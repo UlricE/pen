@@ -118,12 +118,7 @@ typedef struct {
 typedef struct {
 	int status;		/* last failed connection attempt */
 	int acl;		/* which clients can use this server */
-#if 0
-	int port;
-	struct in_addr addr;
-#else
-	struct sockaddr addr;
-#endif
+	pen_addr addr;
 	int c;			/* connections */
 	int weight;		/* default 1 */
 	int prio;
@@ -352,6 +347,13 @@ static void init_mask(void)
 			}
 		}
 	}
+}
+
+static char *pen_ntoa(pen_addr *a)
+{
+	static char b[1024];
+	snprintf(b, sizeof b, "%s", inet_ntoa(a->addr.a4));
+	return b;
 }
 
 #ifdef HAVE_SSL
@@ -668,7 +670,6 @@ static void webstats(void)
 		"<td bgcolor=\"#80f080\">prio</td>\n"
 		"</tr>\n");
 	for (i = 0; i < nservers; i++) {
-		struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[i].addr;
 		fprintf(fp,
 			"<tr>\n"
 			"<td>%d</td>\n"
@@ -683,8 +684,8 @@ static void webstats(void)
 			"<td>%d</td>\n"
 			"<td>%d</td>\n"
 			"</tr>\n",
-			i, inet_ntoa(a4->sin_addr),
-			servers[i].status, ntohs(a4->sin_port),
+			i, pen_ntoa(servers[i].addr),
+			servers[i].status, servers[i].addr.port,
 			servers[i].c, servers[i].maxc, servers[i].hard,
 			servers[i].sx, servers[i].rx,
 			servers[i].weight, servers[i].prio);
@@ -716,7 +717,7 @@ static void webstats(void)
 			"<td>%lld</td>\n"
 			"<td>%lld</td>\n"
 			"</tr>\n",
-			i, pen_ntoa(clients[i].addr),
+			i, pen_ntoa(&clients[i].addr),
 			(long)(now-clients[i].last), clients[i].cno, clients[i].connects,
 			clients[i].csx, clients[i].crx);
 	}
@@ -773,15 +774,14 @@ static void textstats(void)
 	debug("Time %s, %d servers, %d current",
 		nowstr, nservers, current);
 	for (i = 0; i < nservers; i++) {
-		struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[i].addr;
 		debug("Server %d status:\n"
 			"address %s\n"
 			"%d\n"
 			"port %d\n"
 			"%d connections (%d soft, %d hard)\n"
 			"%llu sent, %llu received\n",
-			i, inet_ntoa(a4->sin_addr),
-			servers[i].status, ntohs(a4->sin_port),
+			i, pen_ntoa(servers[i].addr),
+			servers[i].status, servers[i].addr.port,
 			servers[i].c, servers[i].maxc, servers[i].hard,
 			servers[i].sx, servers[i].rx);
 	}
@@ -796,7 +796,7 @@ static void textstats(void)
 			"connects  %ld\n",
 			"sent  %llu\n",
 			"received  %llu\n",
-			i, inet_ntoa(clients[i].addr),
+			i, pen_ntoa(&clients[i].addr),
 			(long)(now-clients[i].last), clients[i].cno, clients[i].connects,
 			clients[i].csx, clients[i].crx);
 	}
@@ -840,7 +840,7 @@ static int lookup_client(struct in_addr cli)
 	time_t now = time(NULL);
 
 	for (i = 0; i < clients_max; i++) {
-		if (clients[i].addr.s_addr == ad) break;
+		if (clients[i].addr.addr.a4.s_addr == ad) break;
 	}
 	if (i == clients_max) i = -1;
 	else if (tracking_time > 0 && clients[i].last+tracking_time < now) {
@@ -861,7 +861,7 @@ static int store_client(int clino, struct in_addr cli, int ch)
 
 	if (clino == -1) {
 		for (i = 0; i < clients_max; i++) {
-			if (clients[i].addr.s_addr == cli.s_addr) break; /* XXX */
+			if (clients[i].addr.addr.a4.s_addr == cli.s_addr) break; /* XXX */
 			if (empty != -1) continue;
 			if (clients[i].last == 0) {
 				empty = i;
@@ -884,7 +884,8 @@ static int store_client(int clino, struct in_addr cli, int ch)
 		i = clino;
 
 	clients[i].last = time(NULL);
-	clients[i].addr = cli;
+	clients[i].addr.family = AF_INET;
+	clients[i].addr.addr.a4 = cli;
 	clients[i].cno = ch;
 	clients[i].connects++;
 
@@ -1030,8 +1031,8 @@ static void setaddress(struct in_addr *a, int *port, char *s,
 static void setaddress(int server, char *s, int dp, char *proto)
 #endif
 {
+	struct sockaddr_in ip4addr;
 //	struct hostent *h;
-	struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[server].addr;
 
 	char address[1024], pno[100];
 	int n = sscanf(s, "%999[^:]:%99[^:]:%d:%d:%d:%d",
@@ -1039,8 +1040,8 @@ static void setaddress(int server, char *s, int dp, char *proto)
 		&servers[server].maxc, &servers[server].hard,
 		&servers[server].weight, &servers[server].prio);
 
-	if (n > 1) a4->sin_port = htons(getport(pno, proto));
-	else a4->sin_port = dp;
+	if (n > 1) servers[server].port = getport(pno, proto);
+	else servers[server].port = dp;
 	if (n < 3) servers[server].maxc = 0;
 	if (n < 4) servers[server].hard = 0;
 	if (n < 5) servers[server].weight = 0;
@@ -1048,7 +1049,7 @@ static void setaddress(int server, char *s, int dp, char *proto)
 
 	if (debuglevel)
 		debug("n = %d, address = %s, pno = %d, maxc1 = %d, hard = %d, weight = %d, prio = %d, proto = %s ",
-			n, address, ntohs(a4->sin_port), servers[server].maxc,
+			n, address, servers[server].port, servers[server].maxc,
 			servers[server].hard, servers[server].weight,
 			servers[server].prio, proto);
 
@@ -1061,6 +1062,11 @@ static void setaddress(int server, char *s, int dp, char *proto)
 		memcpy(a, h->h_addr, h->h_length);
 	}
 #else
+	if (inet_pton(AF_INET, address, &ip4addr.sin_addr)) != 1) {
+		error("unknown or invalid address [%s]\n", address);
+	} else {
+		servers[server].addr.addr.family = AF_INET;
+		servers[server].addr.a4.s_addr = I AM HERE
 	if (inet_pton(AF_INET, address, &(a4->sin_addr))) {
 		error("unknown or invalid address [%s]\n", address);
 	}
@@ -1079,7 +1085,7 @@ static void netlog(int fd, int i, unsigned char *r, int n)
 	if (debuglevel) debug("netlog(%d, %d, %p, %d)", fd, i, r, n);
 	strcpy(b, "+ ");
 	k = 2;
-	strcpy(b+k, inet_ntoa(clients[conns[i].clt].addr));
+	strcpy(b+k, pen_ntoa(&clients[conns[i].clt].addr));
 	k += strlen(b+k);
 	b[k++] = ' ';
 	strcpy(b+k, inet_ntoa(a4->sin_addr));
@@ -1108,7 +1114,7 @@ static void log_request(FILE *fp, int i, unsigned char *b, int n)
 	int j;
 	struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[conns[i].index].addr;
 	if (n > KEEP_MAX) n = KEEP_MAX;
-	fprintf(fp, "%s ", inet_ntoa(clients[conns[i].clt].addr));
+	fprintf(fp, "%s ", pen_ntoa(&clients[conns[i].clt].addr));
 	fprintf(fp, "%ld ", (long)time(NULL));
 	fprintf(fp, "%s ", inet_ntoa(a4->sin_addr));
 	for (j = 0; j < n && b[j] != '\r' && b[j] != '\n'; j++) {
@@ -1152,7 +1158,7 @@ static int rewrite_request(int i, int n, char *b)
 	if (debuglevel) debug("Adding X-Forwarded-For");
 	/* Didn't find one, add our own */
 	sprintf(p, "\r\nX-Forwarded-For: %s",
-		inet_ntoa(clients[conns[i].clt].addr));
+		pen_ntoa(&clients[conns[i].clt].addr));
 	pl=strlen(p);
 	if (n+pl > BUFFER_MAX) return n;
 
@@ -1589,7 +1595,7 @@ static void init(int argc, char **argv)
 
 	for (i = 0; i < clients_max; i++) {
 		clients[i].last = 0;
-		clients[i].addr.s_addr = 0;
+		memset(&clients[i].addr, 0, sizeof(clients[i].addr));
 		clients[i].cno = 0;
 		clients[i].connects = 0;
 		clients[i].csx = 0;
@@ -2004,7 +2010,7 @@ static void do_cmd(char *b, void (*output)(char *, void *), void *op)
 		for (n = 0; n < clients_max; n++) {
 			if (clients[n].last < when) continue;
 			sprintf(b, "%s connects %ld sx %lld rx %lld\n",
-				inet_ntoa(clients[n].addr),
+				pen_ntoa(&clients[n].addr),
 				clients[n].connects,
 				clients[n].csx, clients[n].crx);
 			output(b, op);
