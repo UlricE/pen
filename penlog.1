@@ -1,0 +1,30 @@
+.TH PENLOG 1 LOCAL
+
+.SH NAME
+penlog
+
+.SH SYNOPSIS
+.B penlog
+server_ip server_port [my_ip]
+
+.SH EXAMPLE
+penlog lbhost:10000
+
+.SH DESCRIPTION
+.I Penlog
+reads webserver log entries from stdin and sends them using UDP to
+penlogd. It is intended for Apache's "reliable piped logs".
+To use penlog from Apache, add a command
+like this to the web server's httpd.conf:
+
+CustomLog "|/usr/local/bin/penlog somehost 10000" common
+
+The optional third argument is used if the server has several addresses.
+Penlogd uses the source address to identify the server, and it must be
+identical to the address configured in the command line to Pen.
+
+.SH SEE ALSO
+pen(1), penlogd(1)
+
+.SH AUTHOR
+Copyright (C) 2002 Ulric Eriksson, <ulric@siag.nu>.

@@ -1,0 +1,67 @@
+.TH PENLOGD 1 LOCAL
+
+.SH NAME
+penlogd
+
+.SH SYNOPSIS
+.B penlogd
+[-fd] [-j dir] [-l logfile] [-n N] [-p pidfile] [-u user] port
+
+.SH EXAMPLE
+penlogd -l /var/log/access_log -p /var/run/penlogd.pid 10000
+
+.SH DESCRIPTION
+.I Penlogd
+receives log entries from Pen and from each of the web servers. It
+consolidates the entries by replacing the source addresses in each entry
+with the "real" client address and writes the result to stdout or to
+the file given on the command line.
+This completely removes the need for postprocessing with mergelogs,
+since the logs are already merged.
+
+Pen must be instructed to send its log to penlogd. See HOWTO and pen man page
+for details.
+
+Sending penlogd a HUP signal will make it close and reopen the logfile, unless
+it is logging to stdout. Rotate the log like this:
+
+mv access_log access_log.1
+kill -HUP `cat <pidfile>`
+
+where <pidfile> is the file containing pen's process id.
+
+Sending penlogd a TERM signal will make it close the log file and exit cleanly.
+
+.SH OPTIONS
+.TP
+-d
+Turn on debugging. The output goes to stderr if we are running in the
+foreground (see -f) and to syslog (facility user, priority debug)
+otherwise.
+.TP
+-f
+Stay in foreground.
+.TP
+-j \fIdir\fR
+Run in a chroot environment.
+.TP
+-l \fIlogfile\fR
+Write output into logfile.
+.TP
+-n \fIN\fR
+Number of pen log entries to cache (default 1000).
+.TP
+-p \fIpidfile\fR
+Write process id into pidfile.
+.TP
+-u \fIuser\fR
+Run as a different user.
+.TP
+port
+The UDP port where penlogd receives log entries.
+
+.SH SEE ALSO
+pen(1), penlog(1), webresolve(1)
+
+.SH AUTHOR
+Copyright (C) 2002-2003 Ulric Eriksson, <ulric@siag.nu>.

@@ -1,0 +1,412 @@
+
+140205	Updated penctl man page with syntax for IPv6 and GeoIP access lists.
+	Fixed cosmetic signedness compiler warnings.
+
+140204	Moved defines for ACE_IPV4 et al outside #ifdef HAVE_SSL clause.
+	Otherwise pen won't compile without ssl.
+	Released 0.21.1.
+
+140204	GeoIP access lists.
+	Released 0.21.0.
+
+140120	Added "special exception" clause for linking with OpenSSL.
+	Released 0.20.2.
+
+131127	Penlog ipv6 compatible.
+
+131126	Modernized automake configuration.
+	Penctl ipv6 compatible.
+
+131123	Updated autoconf to 2.69.
+	Released 0.20.1.
+
+131122	Updated SSL code. Protocol ssl2 removed. Default changed to tls1.
+	Released 0.20.0.
+
+131120	Added UDP patch from Zen.
+	Released 0.19.0.
+
+080517	Added patch from Debian that fixes some issues with penctl.cgi.
+	Released 0.18.0.
+
+080503	Priority based server selection algorithm.
+
+080501	Patch from Stephen P. Schaefer fixes several issues in
+	write_cfg.
+	In the server_by_weight function, multiply current connections
+	by WEIGHT_FACTOR to make the selection mo fine grained when the
+	number of connections is small.
+	Released 0.17.3.
+
+080326	Patch from Dana Contreras: send stdio to /dev/null after
+	forking.
+	Fixed a bunch of cosmetic signedness compiler warnings.
+
+070912	Added sanity check to init() to make sure that servers_max
+	is large enough for the number of servers specified on the
+	command line.
+	Released 0.17.2.
+
+070829	Faster string duplication courtesy of Nigel Horne.
+
+070502	Updated automake links.
+
+070212	Updated INSTALL with instructions for increasing the number
+	of connections on Windows.
+
+061204	Include server weight in response to "penctl servers" command.
+	Set server weight on command line. Server is specified as
+	host:port:maxconn:hard:weight.
+
+060627	Bugfix by Chris Elsworth: server_by_weight would never
+	consider blacklisted servers, which kept them blacklisted
+	indefinitely.
+	Released 0.17.1.
+
+051230	Added code by Chris Elsworth for kqueue support. Configure
+	with --with-kqueue to enable.
+	Released 0.17.0.
+
+051215	Changed the configure option for ssl to
+	--with-experimental-only-ssl.
+	Released 0.16.0.
+
+040709	Added an "abuse server" for naughty clients that have been
+	denied access by an acl. Works similar to the emergency server,
+	use command-line option "-B host:port" to enable.
+
+040706	Servers can be assigned different weights to account for
+	differing capacity. New -W command-line option. New penctl
+	commands:
+	server S weight W	(assign weight to server)
+	weight			(use weight for server selection)
+	no weight		(do not use weight for server selection)
+
+	Cleaned up the logic in add_client so the weighted server
+	selection can be used without client tracking.
+
+	Released 0.15.0.
+
+040624	Some performance enhancing changes:
+
+	New variable connections_used remembers the number of used
+	slots in conns[]. It is incremented by store_conn and
+	decremented by close_conn. This allows the main loop to
+	only accept new connections if there are empty slots in
+	conns[], which is much better than accepting the connection
+	only to immediately close it because we can't handle it.
+
+	New variable connections_last remembers the last used slot
+	in conns[]. This allows us to scan for empty slots much faster
+	in store_conn when there are many simultaneous connections.
+
+	Released 0.14.0.
+
+040622	Documented the procedure to change FD_SETSIZE on Linux
+	in INSTALL.
+
+040604	Documented the include command in the penctl manpage.
+
+040527	Fixed SSL so it works in nonblocking mode, except that
+	it doesn't work anyway.
+	Moved listenfd and ctrlfd out of main.
+
+040428	Highly experimental SSL code in pen.c. Updated manpage
+	with the new options. Added https example to HOWTO.
+	Released 0.13.0.
+
+040403	Replaced signal with sigaction so connect() to nonexisting
+	servers can be interrupted and not restarted.
+	Released 0.12.3.
+
+040318	Bugfix by Andreas Wrede: Running pen with -H to generate
+	X-Forwarded-For headers causes POST request data sections
+	to be dropped, if they are in the same packet as the POST
+	header (rather than a continuation packet) and the if the
+	POST data contains binary zeros.  This is almost always the
+	case with Internet Explorer 6.  Mozilla and friends send
+	the data of a POST request in a separate packet, so the
+	problem does not show up there.
+
+040310	Changed setlinebuf to setvbuf in penlogd.c
+	Released 0.12.2.
+
+040201	Bugfix: rewrite_request would only add the X-Forwarded-For
+	header for the first request.
+	Released 0.12.1.
+
+040104	Removed the reference to mergelogs from the README and
+	added one to penlogd instead.
+
+031023	Released 0.12.0.
+
+031022	Penlogd: sscanf would read 100 bytes + terminating nul into
+	a buffer of size 100. Now reads 99+nul. Spotted by Oezguer Kesim.
+
+031021	Let tracking time be set through penctl.cgi.
+	In do_cmd, "no log": only close the logfile if it is open.
+	New penctl command, "write [FILE]" writes current configuration
+	to a file. If FILE is omitted, overwrite the original
+	configuration file (-F option).
+
+031017	Pen: Time based expiration of tracked clients. Default is
+	0 seconds = never expire. Added -T option to control expiry
+	time. Also added penctl command "tracking N".
+	Penlogd: zero-terminate results from recvfrom.
+
+031013	In penlogd.c: don't complain if recvfrom is interrupted by signal.
+
+031013	Released 0.11.1.
+
+031011	Use sigaction rather than signal in penlogd.
+	Check for inet_aton in libresolv (needed for Solaris).
+	Install documentation into ${prefix}/doc/pen (can be
+	changed using the --with-doc= configuration option).
+	Added tgz target to Makefile.am for Slackware packaging.
+
+030922	Added an "include" keyword to the command interface, so the
+	configuration can be split into several files.
+	Added access control lists, numbered 0 to 9. The command
+	syntax to define them are:
+	acl N permit|deny ipaddress mask	create acl
+	no acl N				delete acl
+	client_acl N			bind clients to acl
+	control_acl N			bind control interface to acl
+	server S acl N			who can use server S
+	All access lists start out empty, defaulting to permit anything.
+
+030910	In rewrite_request: don't add an X-Forwarded-For: if there
+	already is one.
+
+030906	Added a configuration file (-F option) with commands in
+	penctl format. It is read after processing all command line
+	arguments and also when a HUP signal is received.
+
+030905	Updated pen manpage to reflect the new -X and -S options.
+	In rewrite_request: look for \n\n if we can't find
+	\r\n\r\n. Some clients do that, according to
+	Steve Hall <steveh@intrapower.com.au>.
+	Moved everything from CONTROL into penctl.1.
+	Also added the exit command to penctl.1.
+
+030905	Released 0.10.3.
+
+030904	Preallocate slots for servers that can be dynamically added
+	and removed using the control interface, up to a maximum
+	number determined by the -S option (default 16).
+
+030821	A patch from Anders Nordby <anders@fix.no> sets the group
+	as well as user id when running pen with the -u option.
+
+030821	Released 0.10.2.
+
+030820	A patch from Mikko Ruuska (mikko.ruuskaxi at solidtech.com) adds
+	an exit command to pen's control port interface.
+
+030820	Patch for pen.c by Andreas Wrede <andreas@planix.com>, fixing
+	the following bugs:
+
+	The message indicating a failed server is re-issued on every attempt,
+	due to a inverted if-test.
+
+	The attached patch issues the messages only the first time a server
+	fails and it shows when we will retry the connection. It also
+	suppresses multiple "Using emergency server" messages.
+
+030820	#include <string.h> in penlog.c.
+
+030820	Patch for penlogd.c by Branson Matheson <branson@windborne.net>:
+	  - pen sends two lines for every log.. penlogd only needs one 
+	        to function. 
+	  - added a -b ... unbuffer to the opts for penlogd so that you 
+	        can actually see the lines as they come out.
+	  - changed one of the dubugs to so post processing of the input
+	        data. 
+
+030407	Bugs uncovered by Charlie Reitsma <reitsmac@denison.edu>:
+	HOWTO incorrectly specified penctl in place of penlog
+	in Apache configuration example, and using penctl to
+	redirect log to penlogd didn't work.
+	Avoid bogus header rewriting in rewrite_request.
+	Released 0.10.1.
+
+030210	New penctl commands "http" and "no http" to toggle -H.
+
+030208	New option -H adds X-Forwarded-For header to http requests.
+
+020717	Patches from Patroklos G. Argyroudis <argp@ieee.org>:
+	 - check getopt() calls against -1 and not EOF
+	 - fix for a possible format string in pen.c
+
+020711	Ported to Darwin/MacOS X.
+	Released 0.9.4.
+
+020705	New penctl command: recent [seconds] displays clients that have
+	connected recently (default five minutes), along with number of
+	connects, transmitted and received data.
+
+020702	Buffer overflow in netlog. See comment in pen.c.
+	Added options -j (for chroot) and -u (for setuid) to pen and
+	penlogd. See manpages.
+
+020627	Fixed an error which could throw penlogd into an endless loop
+	if a udp packet was lost at the crucial moment.
+
+020626	Pedantic checking of memory allocations and buffer sizes.
+
+020618	Penlogd: added option -n to adjust the number of cached log
+	entries from Pen.
+
+020614	Added options -d, -f, -l and -p to penlogd. They do the same
+	as in pen. Also added signal handlers for TERM and HUP; these
+	too do the same as in pen. Updated penlogd manpage.
+	Updated www section in HOWTO to use penlog rather than mergelogs.
+
+020613	Added penlog.c to log over a network using Apaches reliable
+	piped logs. A companion log server, penlogd.c, consolidates
+	logs from Pen and from all web servers into a single file.
+	Added the necessary code to Pen log over the network.
+
+020610	Wrote penctl.cgi, a web wrapper for penctl.
+
+020609	Wrote a new version of the main loop, using poll() instead of
+	select(). Added configuration option --with-poll to enable.
+	Also turned redefinition of FD_SETSIZE into a configuration
+	option --with-fd_setsize=N.
+	Updated installation instructions in INSTALL.
+
+020605	Added optional hard limit to the number of connections to each
+	server.
+	Timestamps in debug log entries.
+	Released 0.8.0.
+
+020604	Added "server of last resort" (-e option) which is only used
+	when all other servers are unavailable. (Andreas Wrede)
+
+020528	Several enhancements and bugfixes by Andreas Wrede:
+	In webstats: changed CLIENTS_MAX to clients_max and
+	CONNECTIONS_MAX to connections_max.
+	Show time in human-readable format rather than seconds since 1970.
+	Changed byte counters from unsigned long to unsigned long long.
+	Fixed file descriptor leak: The connection wasn't closed when
+	the connection table was full.
+	Moved stats generation and log restart out of the signal handlers
+	and into the main loop.
+	If a client went away before receiving all its data (large files),
+	the remaining portion would be sent to the next client occupying
+	the same slot.
+	Added pointers in connection structure to avoid having to memcpy
+	the buffers in flush_up/flush_down.
+	Released 0.7.0.
+
+020507	Updated the penctl manpage to reflect reality.
+	Released 0.6.3.
+
+020417	Added -D switch to make copy_up and copy_down *always* store data
+	in a temporary buffer and wait for the next round through the
+	main loop before passing it on to the receiving end.
+	The penctl command for this is "delayed_forward".
+	When making sockets nonblocking (through fcntl(..., O_NONBLOCK)),
+	make sure that any existing flags are not reset in the process.
+	Important bugfix: each failed connection attempt in try_server
+	would result in one socket leaked because we returned without
+	closing it.
+
+020413	Figured out why nonblocking mode was slower than blocking. Fixed.
+
+020411	Added penctl, a simple user interface to the control protocol.
+
+020324	Cancel timeout if it isn't needed.
+
+020115	Added LDAP info in the HOWTO.
+	Added the flush_up/flush_down bugfix from 0.5.0 again.
+	Released 0.6.1.
+
+020111	Moved #include <sys/types.h> before #include <netinet/in.h>
+	Replaced the call to setpgrp with setsid.
+	Transformed mergelogs into ultimately portable ANSI C (almost).
+	Thanks to Mike Dugas <mad@phobia.net> for help with porting
+	to FreeBSD 4.4-RELEASE.
+
+020110	Rewrote mergelogs completely. It will now never discard a web
+	server log entry, and it tries much harder to locate a good
+	match in the pen log. It deals with log entries that are out
+	of order and servers with unsynchronized clocks and/or
+	different time zones. The -l (lag) option is no more.
+	Removed the -r (rejects) option, since we no longer reject anything.
+	Released 0.6.0
+
+010915	Made the use of daemon() optional.
+	Added the cgi script penstats to update and display statistics.
+	Set current in store_conn.
+	Released 0.5.0.
+
+010914	Statistics in HTML format (Riccard Åkerman).
+	Tested pen on HP-UX 10.20.
+
+010913	Released 0.4.0.
+
+010912	When storing part of the buffer for a renewed attempt,
+	store the *end*, not the beginning. Affects copy_up and copy_down.
+	Autoconf. Use daemon() if available. Make sure that we don't try
+	to close uninitialized file handles in add_client.
+	New option -n to not make sockets nonblocking (mainly useful
+	for debugging).
+
+010911	Make sure that remaining data is stored away when we get EAGAIN
+	in copy_up.
+	Released 0.3.3.
+
+010909	Added -p argument to store process id in a file (Andreas Wrede).
+	Made the sockets nonblocking. Handle EAGAIN in copy_up/down.
+	Released 0.3.2.
+
+010908	Ignore SIGPIPE. Released 0.3.1.
+
+010827	Option -h uses a hash on the client IP address for the initial
+	server selection. Option -s ("stubborn") prevents failover to
+	another server if the initial choice is unavailable.
+
+010824	Use getport for the local port as well.
+
+010820	Append to the logfile rather than overwriting it.
+	Released 0.2.0.
+
+010817	Server selection algorithm rewritten in a cleaner, simpler way.
+	Blacklist nonresponding servers for a selectable period of time.
+	Optional "plain" roundrobin without client tracking.
+	(options -b and -r, see manpage).
+	Log to syslog if we are running in the background.
+
+010814	Installed pen on siag.nu, which now load-balances itself. Apache
+	runs on port 8080, pen on 80. Seems to work (tm).
+
+010813	Added description of options to pen.1 and mergelogs.1.
+	Script to guess libraries.
+
+010812	Fixed typo (webmerge -> mergelogs) in pen.1.
+
+010809	Added mergelogs, a program to match pen logs against web server
+	logs and merge the results into one log file with the correct
+	client addresses.
+	Released 0.1.0.
+
+010808	Print statistics on stderr when sent USR1 signal.
+	Ported to Solaris, i.e. verified that it works ;-).
+	Logging. Reopen log file when sent HUP signal.
+	Exit cleanly when sent TERM signal.
+
+010807	Wrote a manpage.
+
+010803	Completed the conversion to non-forking, selecting mode. Works
+	really well now, with very low CPU utilization even with many
+	simultaneous connections.
+
+010729	Rewrote the program to not fork.
+
+010722	Prettied up the source.
+
+001218	Updated the README.
+
+001022	Rewrote the load balancing algorithm.
+

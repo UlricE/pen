@@ -1,0 +1,68 @@
+.TH MERGELOGS 1 LOCAL
+
+.SH NAME
+mergelogs
+
+.SH SYNOPSIS
+.B mergelogs
+-p penlog [-c] [-d] [-j jitter] [-t seconds] server1:logfile1 [server2:logfile2 ...]
+
+.SH EXAMPLES
+mergelogs -p pen.log 10.0.0.1:access_log.1 10.0.0.2:access_log.2
+
+mergelogs -p pen.log 10.0.18.6:access_log-10.0.18.6 10.0.18.8:access_log-10.0.18.8
+
+.SH DESCRIPTION
+When pen is used to load balance web servers, the web server log file
+lists all accesses as coming from the host running pen. This makes it
+more difficult to analyze the log file.
+
+To solve this, pen creates its own log file, which contains the real
+client address, the time of the access, the target server address
+and the first few bytes of the requests.
+
+Mergelogs reads pen's log file and the log files of all load balanced
+web servers, compares each entry and creates a combined log file
+that looks as if the web server cluster were a single physical server.
+Client addresses are replaced with the real client addresses.
+
+In the event that no matching client address can be found in
+the pen log, the server address is used instead. This should never
+happen, and is meant as a debugging tool. A large number of these
+indicates that the server system date needs to be set, or that
+the jitter value is too small.
+
+You probably don't want to use this program. Penlog is a much more
+elegant and functional solution.
+
+.SH OPTIONS
+.TP
+-c
+Do not cache pen log entries. The use of this option is not recommended,
+as it will make mergelogs search the
+entire pen log for every line in the web server logs.
+.TP
+-d
+Debugging (repeat for more).
+.TP
+-p \fIpenlog\fR
+Log file from pen.
+.TP
+-j \fIjitter\fR
+Jitter in seconds (default 600). This is the maximum variation in time
+stamps in the pen and web server log files. A smaller value will result
+in a smaller pen log cache and faster processing, at the risk of
+missed entries.
+.TP
+-t \fIseconds\fR
+The difference in seconds between the time on the pen server and UTC.
+For example, this is 7200 (two hours) in Finland.
+.TP
+server:logfile
+Web server address and name of log file.
+
+.SH AUTHOR
+Copyright (C) 2001-2003 Ulric Eriksson, <ulric@siag.nu>.
+
+.SH SEE ALSO
+pen(1), webresolve(1), penlog(1), penlogd(1)

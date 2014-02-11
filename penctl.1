@@ -1,0 +1,191 @@
+.TH PENCTL 1 LOCAL
+
+.SH NAME
+penctl
+
+.SH SYNOPSIS
+.B penctl
+host:port command
+
+.SH EXAMPLE
+penctl lbhost:8888 roundrobin
+
+Turns off client tracking on the load balancer running on lbhost.
+
+.SH DESCRIPTION
+.I Penctl
+connects to the optional control socket on a pen load balancer.
+It reads commands from the command line, performs minimal syntax
+checking and sends them to pen. Replies, if any, are printed on stdout.
+
+The program can also be used through the cgi script penctl.cgi,
+which allows pen to be controlled from any web browser.
+
+.SH OPTIONS
+.TP
+\fIhost:port\fR
+Specifies a control port where the load balancer listens for commands.
+
+.SH COMMANDS
+.TP
+\fIacl N permit|deny sourceip4 [mask]\fR
+Adds an entry to access list N, where N is a number from 0 to 9. The source and mask addresses are in the usual dotted quad notation. If mask is omitted, it defaults to 255.255.255.255.
+
+.TP
+\fIacl N permit|deny sourceip6[/length]\fR
+If the source address contains the character ':', the address is interpreted as
+IPv6. Unlike IPv4 access entries, a length is used to indicate the mask. If
+length is omitted, it defaults to 128.
+
+.TP
+\fIacl N permit|deny country NN\fR
+If the source address is the special word "country", a two-letter country
+code can be used to restrict access to the load balancer. For this to work,
+pen must be built with geoip support.
+.TP
+\fIno acl N\fR
+Deletes all entries from access list N. The resulting access list
+permits all traffic.
+.TP
+\fIascii\fR
+Communication dumps in ascii format (cf option -a).
+.TP
+\fIno ascii\fR
+Communication dumps in hex format.
+.TP
+\fIblacklist\fR
+Return current blacklist time in seconds.
+.TP
+\fIblacklist T\fR
+Set the blacklist time in seconds.
+.TP
+\fIblock\fR
+Do not make sockets nonblocking.
+.TP
+\fIno block\fR
+Make sockets nonblocking.
+.TP
+\fIclient_acl N\fR
+Check connecting clients against access list N (default 0).
+.TP
+\fIclients_max\fR
+Return max number of clients.
+.TP
+\fIconn_max\fR
+Return max number of simultaneous connections.
+.TP
+\fIcontrol\fR
+Return address and port where pen listens for control connections.
+.TP
+\fIcontrol_acl\fR
+Check accesses to the control port against access list N (default 0).
+.TP
+\fIdebug\fR
+Return current debug level.
+.TP
+\fIdebug N\fR
+Set debug level to N.
+.TP
+\fIdelayed_forward\fR
+Always wait for the next round of the main loop before forwarding data. Normally pen tries to do that immediately.
+.TP
+\fIno delayed_forward\fR
+Try to forward data immediately, to avoid the overhead of copying it to a temporary buffer and waiting for the next main loop round.
+.TP
+\fIexit\fR
+Exit. Only available if pen was started with the -X option.
+.TP
+\fIhash\fR
+Use a hash on the client IP address for initial server selection.
+.TP
+\fIno hash\fR
+Do not use a hash.
+.TP
+\fIhttp\fR
+Add X-Forwarded-For headers to http requests.
+.TP
+\fIno http\fR
+Do not add X-Forwarded-For headers.
+.TP
+\fIinclude FILE\fR
+Read commands from file.
+.TP
+\fIlisten\fR
+Return local address and port pen listens to for incoming client connections.
+.TP
+\fIlog\fR
+Show where pen is logging, if anywhere.
+.TP
+\fIlog FILE\fR
+Log to FILE.
+.TP
+\fImode\fR
+Write a summary of the current mode of operation. The listed modes are block, delayed_forward, hash, roundrobin, stubborn.
+.TP
+\fIno log\fR
+Turn off logging.
+.TP
+\fIpid\fR
+Return the process id of the running daemon
+.TP
+\fIprio\fR
+Use the priority based algorithm.
+.TP
+\fIno prio\fR
+Do not use the priority based algorithm.
+.TP
+\fIrecent [N]\fR
+Shows which clients have connected in the last N seconds (default 300).
+.TP
+\fIroundrobin\fR
+Use round-robin server selection without client tracking
+.TP
+\fIno roundrobin\fR
+
+.TP
+\fIserver N [ acl A | address A | port P | max M | hard H | blacklist T | weight W | prio P ]\fR
+Change acl, address, port, weight, priority and/or max connections for server N, or blacklist it for T seconds.
+.TP
+\fIservers\fR
+List address, port, weight, priority and max number of simultaneous connections for each remote server.
+.TP
+\fIstatus\fR
+Print status information in html format.
+.TP
+\fIstubborn\fR
+If the initial server selection is unavailable, close the client connection without trying another
+.TP
+\fIno stubborn\fR
+.TP
+\fItimeout\fR
+Return current connect timeout in seconds.
+.TP
+\fItimeout N\fR
+Set connect timeout to N seconds.
+.TP
+\fItracking N\fR
+Set tracking time, i.e. how long clients will be remembered. The default 0 will never expire clients based on time.
+.TP
+\fIweb_stats\fR
+Return file name of html status reports, if any.
+.TP
+\fIweb_stats FILE\fR
+Set the name of html status reports.
+.TP
+\fIno web_stats\fR
+Do not generate html status reports.
+.TP
+\fIweight\fR
+Use weight for server selection.
+.TP
+\fIno weight\fR
+Do not use weight for server selection.
+.TP
+\fIwrite [FILE]\fR
+Write the current configuration into a file which can be used to start pen. If FILE is omitted, the configuration is written into pen's original configuration file.
+
+.SH SEE ALSO
+pen(1)
+
+.SH AUTHOR
+Copyright (C) 2002-2014 Ulric Eriksson, <ulric@siag.nu>.

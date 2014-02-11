@@ -1,0 +1,206 @@
+.TH PEN 1 LOCAL
+
+.SH NAME
+pen
+
+.SH SYNOPSIS
+.B pen
+[-b sec] [-S N] [-c N] [-e host:port] [-t sec] [-x N] [-j dir] [-u user] [-F cfgfile] [-l logfile] [-p file ] [-w file] [-C port] [-T sec] [-HWXadfhnrs] [-o option] [-E certfile] [-K keyfile] [-G cacertfile] [-A cacertdir] [-Z] [-R] [-L protocol] [host:]port h1[:p1[:maxc1[:hard1[:weight1[:prio1]]]]] [h2[:p2[:maxc2[:hard2[:weight2[:prio2]]]]]] ...
+
+.SH EXAMPLE
+pen 80 www1:8000:10 www2:80:10 www3
+
+Here three servers cooperate in a web server farm. Host www1 runs its
+web server on port 8000 and accepts a maximum of 10 simultaneous connections.
+Host www2 runs on port 80 and accepts 10 connections. Finally, www3 runs
+its web server on port 80 and allows an unlimited number of simultaneous
+connections.
+
+.SH DESCRIPTION
+.I Pen
+is a load balancer for tcp based protocols such as
+http or smtp. It allows several servers to appear as one to the
+outside and automatically detects servers that are down and distributes
+clients among the available servers. This gives high availability and
+scalable performance.
+
+The load balancing algorithm keeps track of clients and will try to
+send them back to the server they visited the last time. The client
+table has a number of slots (default 2048, settable through command-line
+arguments). When the table is full, the least recently used one will
+be thrown out to make room for the new one.
+
+This is superior to a simple round-robin algorithm, which sends a client
+that connects repeatedly to different servers. Doing so breaks
+applications that maintain state between connections in the server,
+including most modern web applications.
+
+When pen detects that a server is unavailable, it scans for another
+starting with the server after the most recently used one. That way
+we get load balancing and "fair" failover for free.
+
+Correctly configured, pen can ensure that a server farm is always
+available, even when individual servers are brought down for maintenance
+or reconfiguration. The final single point of failure, pen itself,
+can be eliminated by running pen on several servers, using vrrp to
+decide which is active.
+
+Sending pen a USR1 signal will make it print some useful statistics on stderr,
+even if debugging is disabled. If pen is running in the background (i.e.
+without the -f option), syslog is used rather than stderr. If the
+-w option is used, the statistics is saved in HTML format in the
+given file.
+
+Sending pen a HUP signal will make it close and reopen the logfile,
+if logging is enabled, and reload the configuration file.
+
+Rotate the log like this (assuming pen.log
+is the name of the logfile):
+
+mv pen.log pen.log.1
+kill -HUP `cat <pidfile>`
+
+where <pidfile> is the file containing pen's process id, as written by the -p option.
+
+Sending pen a TERM signal will make it exit cleanly, closing the
+log file and all open sockets.
+
+.SH OPTIONS
+.TP
+-C \fIport\fR
+Specifies a control port where the load balancer listens for commands.
+.TP
+-F \fIcfgfile\fR
+Names a configuration file with commands in penctl format (see penctl.1). The file is read after processing all command line arguments, and also after receiving a HUP signal.
+.TP
+-H
+Adds X-Forwarded-For header to http requests.
+.TP
+-P
+Use poll() for event notification.
+.TP
+-Q
+Use kqueue() for event notification (BSD).
+.TP
+-W
+Use weight for server selection.
+.TP
+-X
+Adds an exit command to the control interface.
+.TP
+-a
+Used in conjunction with -dd to get communication dumps in ascii
+rather than hexadecimal format.
+.TP
+-b \fIsec\fR
+Servers that do not respond are blacklisted, i.e. excluded from the
+server selection algorithm, for the specified number of seconds (default 30).
+.TP
+-T \fIsec\fR
+Clients are tracked for the specified number of seconds so they can be sent to the same server as the last time (default 0 = never expire clients).
+.TP
+-S \fIN\fR
+Max number of servers (default 16).
+.TP
+-c \fIN\fR
+Max number of clients (default 2048).
+.TP
+-d
+Debugging (repeat -d for more). The output goes to stderr if we are running
+in the foreground (see -f) and to syslog (facility user, priority
+debug) otherwise.
+.TP
+-e \fIhost:port\fR
+host:port specifies the emergency server to contact if all regular 
+servers become unavailable.
+.TP
+-f
+Stay in foreground.
+.TP
+-h
+Use a hash on the client IP address for the initial server selection.
+This makes it more predictable where clients will be connected.
+.TP
+-j \fIdir\fR
+Run in a chroot environment.
+.TP
+-l \fIfile\fR
+Turn on logging.
+.TP
+-n
+Nonblocking.
+.TP
+-p \fIfile\fR
+Write the pid of the running daemon to \fIfile\fR.
+.TP
+-r
+Go straight into round-robin server selection without looking up
+which server a client used the last time.
+.TP
+-s
+Stubborn server selection: if the initial choice is unavailable, the
+client connection is closed without trying another server.
+.TP
+-t \fIsec\fR
+Connect timeout in seconds (default 5).
+.TP
+-u \fIuser\fR
+Run as a different user.
+.TP
+-x \fIN\fR
+Max number of simultaneous connections (default 256).
+.TP
+-w \fIfile\fR
+File for status reports in HTML format.
+.TP
+-o \fIoption\fR
+Use option in penctl format.
+.TP
+-E \fIcertfile\fR
+Use the given certificate in PEM format.
+.TP
+-K \fIkeyfile\fR
+Use the given key in PEM format (may be contained in cert).
+.TP
+-G \fIcacertfile\fR
+File containing the CA's certificate.
+.TP
+-A \fIcacertdir\fR
+Directory containing CA certificates in hashed format.
+.TP
+-Z
+Use SSL compatibility mode.
+.TP
+-R
+Require valid peer certificate.
+.TP
+-L \fIprotocol\fR
+ssl23, ssl3 or tls1 (default).
+.TP
+host:port
+The local address and port pen listens to. By default pen listens to
+all local addresses.
+.TP
+h1:p1:soft:hard:weight:prio
+The address, port and maximum number of simultaneous connections for
+a remote server. By default, the port is the same as the local port,
+and the soft limit on the number of connections is unlimited. The hard
+limit is used for clients which have accessed the server before.
+The weight and prio are used for the weight- and priority-based
+server selection algorithms.
+
+.SH LIMITATIONS
+Pen runs in a single process, and opens two sockets for each connection.
+Depending on kernel configuration, pen can run out of file descriptors.
+
+The SSL support is only available if pen was built with the --with-ssl
+option.
+
+.SH SEE ALSO
+penctl(1), dwatch(1), mergelogs(1), webresolve(1)
+
+.SH AUTHOR
+Copyright (C) 2001-2014 Ulric Eriksson, <ulric@siag.nu>.
+
+.SH ACKNOWLEDGEMENTS
+In part inspired by balance by Thomas Obermair.

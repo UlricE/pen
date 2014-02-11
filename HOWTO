@@ -1,0 +1,347 @@
+HTTP
+----
+
+pen -l pen.log -p pen.pid lbhost:80 host1:80 host2:80
+
+If pen is running on one of the web servers, it might seem like
+a good idea to simply use an alternative port for the web server
+process, reusing the IP address. Unfortunately, that doesn't work
+very well. Look at this (simplified) example:
+
+sh-2.05# pen lbhost:80 lbhost:8080
+sh-2.05# telnet lbhost 80
+Trying 127.0.0.1...
+Connected to lbhost.
+Escape character is '^]'.
+GET /bb
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+<HTML><HEAD>
+<TITLE>301 Moved Permanently</TITLE>
+</HEAD><BODY>
+<H1>Moved Permanently</H1>
+The document has moved <A HREF="http://lbhost:8080/bb/">here</A>.<P>
+<HR>
+<ADDRESS>Apache/1.3.14 Server at lbhost Port 8080</ADDRESS>
+</BODY></HTML>
+Connection closed by foreign host.
+
+This will cause the client to attempt to contact the web server
+directly, which may not be possible depending on firewall configuration
+and is certainly not desirable since it defeats any load balancing
+attempts from pen.
+
+
+The solution is to bind two addresses to the server running pen, and
+use one address for pen and the other for the web server. Like this:
+
+pen address1:80 address2:80 server2:80
+
+Here, address1 and address2 refer to the same server, while server2
+refers to another server.
+
+
+The programs penlog and penlogd are used to combine the web server
+logs into a single file which can be used to calculate statistics.
+Penlog runs on each of the web servers. It reads log entries from
+stdin and sends them over the network to the host running penlogd.
+For Apache, this is accomplished by adding a line similar to this
+to httpd.conf:
+
+CustomLog "|/usr/local/bin/penlog loghost 10000" common
+
+For other web servers, the procedure is different. If the server
+cannot write its logs to a pipe, this kludge may actually work:
+
+tail -f /path/to/logfile | penlogd loghost 10000
+
+The command line to pen must also be altered to indicate that the
+logs should go to the penlogd server rather than a file. This is
+accomplished using the
+
+-l loghost:10000
+
+option.
+
+The log file pen.log is used to combine the web server logs into a
+single file which can be used to calculate statistics. Example:
+
+mergelogs -p pen.log \
+	10.0.0.1:access_log.host1 10.0.0.2:access_log.host2 \
+	> access_log
+
+The program mergelogs is distributed with pen. Use matching versions
+of pen and mergelogs to ensure that the log file format is compatible.
+10.0.0.1 and 10.0.0.2 are the IP addresses of host1 and host2. The
+log files access_log.host1 and access_log.host2 are Apache access log
+files in combined or common format. The resulting access_log is in
+the same format as the input files.
+
+If the log file will be used to calculate visitor statistics, you
+probably want host names rather than IP addresses. This can be
+accomplished by forcing the web server to do hostname lookups on
+the clients. This harms performance since the lookups are slow.
+
+A better solution is to use a separate program to process the log
+file. One such program is webresolve, which is usually run from the
+splitwr script to perform many lookups in parallel. Example:
+
+splitwr access_log > access_log.resolved
+
+Webresolve is available from http://siag.nu/webresolve/.
+
+
+HTTPS
+-----
+
+pen -l pen.log -p pen.pid lbhost:443 host1:443 host2:443
+
+Otherwise identical to http (for our purposes), https uses port 443.
+
+Using pen for the ssl encapsulation:
+
+pen -l pen.log -p pen.pid -E mycert.pem lbhost:443 host1:80 host2:80
+
+
+HTTP + HTTPS
+------------
+
+pen -l pen80.log -p pen80.pid -h lbhost:80 host1:80 host2:80
+pen -l pen443.log -p pen443.pid -h lbhost:443 host1:443 host2:443
+
+If we are using http and https in parallel for a single site and
+need to make sure that requests go to the same server for both protocols,
+we use the -h (hash) option. Note that it is still possible for a
+client to end up with a split connection if e.g. http is down on
+host1 and https is down on host2.
+
+The server selection can be made completely deterministic by adding
+the -s option. Pen will then stubbornly refuse to fail over to another
+server if the first choice is unavailable. Obviously, this means the
+site will fail for some clients if either http or https is down on
+any server, which is unsatisfactory.
+
+A better solution is to use a single protocol for all communication,
+or design the application such that split connections do not matter.
+For example, serve static content such as images over http.
+
+
+SMTP
+----
+
+pen -l pen.log -p pen.pid -r lbhost:25 host1:25 host2:25
+
+This is straightforward enough, with the added twist that all
+connections to host1 and host2 appear to come from lbhost. It is
+therefore important that care be taken so that the setup can't be
+used as an open relay for spam.
+
+An example use for load balancing with smtp is for large sites with
+a high volume of outgoing mail.
+
+
+FTP
+---
+
+pen -l pen.log -p pen.pid lbhost:21 host1:21 host2:21
+
+The ftp protocol has quirks that makes load balancing more difficult
+than many other protocols. Details in RFC959, but here is an example
+from a pen debug session:
+
+copy_up(0)
+23: PORT 127,0,0,1,12,212
+
+copy_down(0)
+30: 200 PORT command successful.
+
+copy_up(0)
+18: RETR loadlin.exe
+
+copy_down(0)
+72: 150 Opening BINARY mode data connection for loadlin.exe (32177 bytes).
+
+copy_down(0)
+24: 226 Transfer complete.
+
+Notice how the last two entries claim that the transfer is first
+"opening", and then "complete" with no intermediary step.
+
+In other words, the initial connection is just a command telnet stream.
+For the data transfer, the client opens a port of its own and the server
+connects directly there, bypassing the load balancer.
+
+There isn't necessarily anything particularly wrong about that,
+except that the server will connect from an address that the client
+doesn't expect, and it will have to connect *to* an address that is
+different from the peer in the command stream. In addition, it may not
+work if the server is behind a firewall and it most certainly won't
+work if pen is acting as the firewall.
+
+A solution would be to intercept the PORT command, open a connection
+there, listen to a socket of our own and send a new PORT command to
+the server instead of the one the client sent. We would also need to
+track the command stream during the data transfer, and check for things
+like ABOR and STAT. And we'd have to implements all kinds of
+workarounds for buggy clients and servers.
+
+Messy indeed, and pen doesn't even try. Browse through an ftp client
+some time; it's entertaining to see what programmers think of the
+protocol.
+
+
+Here is a recipe for ftp load balancing that is portable, works and is
+easy to implement.
+
+First a snippet from /etc/hosts. The IP addresses are supposed to be
+public addresses. It is possible to play tricks with NAT to remove
+that requirement, but that is beyond the scope of this document.
+
+123.123.123.1	lbhost
+123.123.123.2	host1
+123.123.123.3	host2
+
+ftp servers are running on host1 and host2. Use this command to
+start pen on lbhost:
+
+pen -l pen.log -p pen.pid lbhost:21 host1:21 host2:21
+
+Incoming connections from clients are distributed to host1 and host2,
+transparently to the user. Outgoing connections from host1 and host2
+bypass lbhost. If there is a firewall between the servers and the
+Internet, it must permit incoming traffic to lbhost on port 21 and
+outgoing traffic from host1 and host2.
+
+This can be prevented from working if the client is behind a firewall
+that does its own stateful session tracking (for example, setting up
+temporary rules that let the server access the client on the port
+given in the PORT command), but there's little or nothing we can do
+about that. Such schemes break anyway if the server has multiple IP
+addresses, load balancing or not.
+
+Picky servers that refuse to set up data streams that bypass the load
+balancer won't work either, but then we at least have the option to
+replace the server. The stock Solaris ftpd is fine; wu-ftpd 2.6.0
+is not.
+
+
+POP3
+----
+
+The pop3 service normally runs from inetd. In that case, it is not
+possible to use multiple IP addresses to allow pen and the pop3
+server to run on the same host. However, there's nothing to stop us
+from using multiple ports. Add this to /etc/services:
+
+pop3-pen	1110/tcp
+
+And change /etc/inetd.conf like this:
+
+# pop3		stream	tcp	nowait	root	/usr/sbin/tcpd	in.pop3d
+pop3-pen	stream	tcp	nowait	root	/usr/sbin/tcpd	in.pop3d
+
+Note how the old entry for pop3 is commented out. Restart inetd and run
+
+pen -p pen.pid pop3 localhost:1110 otherhost:pop3
+
+Pen will listen to the pop3 port and distribute incoming requests
+to the local pop3 server running on port 1110 and to the pop3 server
+running on "otherhost" on the standard port.
+
+
+LDAP
+----
+
+(This was sent as a reply to a question is pen could handle load
+balancing and failover for a group of ldap servers.)
+
+As far as I know, LDAP is a simple tcp based protocol.
+The following experiment on my laptop was successful:
+
+1. Install OpenLDAP
+
+2. Run slapd like this:
+
+        /usr/local/libexec/slapd -d 255
+
+3. Run pen like this:
+
+        pen -d -d -f 3890 localhost:389
+
+4. Run ldapsearch like this:
+
+        ldapsearch -H ldap://localhost:3890 \
+        -x -b '' -s base '(objectclass=*)' namingContexts
+
+
+Slapd and pen spewed lots of debugging info and ldapsearch returned:
+
+8<---
+#
+# filter: (objectclass=*)
+# requesting: namingContexts
+#
+
+#
+dn:
+namingContexts: o=Qbranch,c=SE
+
+# search result
+search: 2
+result: 0 Success
+
+# numResponses: 2
+# numEntries: 1
+8<---
+
+which was what I expected.
+
+Inspired by this success, I repeated the test:
+
+8<---
+/usr/local/libexec/slapd -d 255 -h ldap://localhost:389/
+
+/usr/local/libexec/slapd -d 255 -h ldap://localhost:390/
+
+pen -d -d -f 3890 localhost:389 localhost:390
+
+ldapsearch -H ldap://localhost:3890 \
+        -x -b '' -s base '(objectclass=*)' namingContexts
+8<---
+
+Got a reply. Repeated a few times, then pressed Ctrl-C on the slapd that
+was serving the replies. Did another ldapsearch and got a reply from the
+other slapd.
+
+
+As far as I can see, pen handles LDAP load balancing and failover just
+fine.
+
+
+VRRP
+----
+
+It is possible to install pen on two load balancers and use vrrp
+to get failover in case one of them goes down. To do this, you need
+two servers (obviously), pen and Jerome Etienne's vrrpd for Linux.
+
+Install pen and vrrpd on both servers. Start pen on both servers,
+using all the same parameters and listening on all addresses.
+Finally start vrrpd, again using the same parameters on both
+hosts. Example, using debugging output to show what is going on:
+
+pen -df 2323 192.168.1.240:23
+vrrpd -i eth0 -v 1 192.168.1.199
+
+Now try telnetting to 192.168.1.199 on port 2323. You should get
+connected through pen on one of the servers. Log out and stop
+vrrpd on the active server. Again telnet to 192.168.1.199 port 2323.
+You should get connected again, this time through pen on the other
+server.
+
+Note that this doesn't provide perfect fault tolerance. Vrrpd
+only checks if the other server is alive, but it doesn't care
+if pen is responding.
+
+Also note that the legal status of vrrp is unclear, as both
+Cisco and IBM claim to hold patents on the technology.
+
