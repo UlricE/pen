@@ -1,0 +1,46 @@
+
+This is pen, a load balancer for "simple" tcp based protocols such as
+http or smtp. It allows several servers to appear as one to the
+outside and automatically detects servers that are down and distributes
+clients among the available servers. This gives high availability and
+scalable performance.
+
+The load balancing algorithm keeps track of clients and will try to
+send them back to the server they visited the last time. The client
+table has a number of slots (default 2048, settable through command-line
+arguments). When the table is full, the least recently used one will
+be thrown out to make room for the new one.
+
+This is superior to a simple round-robin algorithm, which sends a client
+that connects repeatedly to different servers. Doing so breaks
+applications that maintain state between connections in the server,
+including most modern web applications.
+
+When pen detects that a server is unavailable, it scans for another
+starting with the server after the most recently used one. That way
+we get load balancing and "fair" failover for free.
+
+Correctly configured, pen can ensure that a server farm is always
+available, even when individual servers are brought down for maintenance
+or reconfiguration. The final single point of failure, pen itself,
+can be eliminated by running pen on several servers, using vrrp to
+decide which is active.
+
+
+A side-effect of the load-balancing is that several logfiles are produced,
+and all accesses seem to come from the load balancer. The program
+penlogd solves this problem by merging pen's log file with the ones
+produced by the web servers. See penlogd(1) and penlog(1) for details.
+
+This load balancer is known to work on FreeBSD, Linux, HP-UX and Solaris.
+Other Unixes should work as well, possibly requiring trivial changes.
+Success stories or problem reports are welcome.
+
+
+If pen is started with the -w option, statistics are saved in html
+format when a USR1 signal is received. The cgi script penstats can
+be used to simplify this; it must be edited to reflect local conditions.
+
+
+I am Ulric Eriksson, ulric@siag.nu.
+
