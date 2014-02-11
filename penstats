@@ -1,0 +1,17 @@
+#!/bin/sh
+
+PENHOME=/home/ulric/Projekt/pen
+PIDFILE=$PENHOME/pid
+WEBFILE=$PENHOME/webstats.html
+
+# This will make pen save its stats
+kill -USR1 `cat $PIDFILE`
+
+# We don't know how long it will take; wait a few seconds
+sleep 2
+
+# And display the results
+echo "Content-type: text/html"
+echo
+cat $WEBFILE
+
