@@ -107,10 +107,23 @@ typedef struct {
 } connection;
 
 typedef struct {
+	unsigned short family;	/* AF_INET, AF_INET6 */
+	unsigned short port;	/* in host byte order */
+	union {
+		struct in_addr a4;
+		struct in6_addr a6;
+	} addr;
+} pen_addr;
+
+typedef struct {
 	int status;		/* last failed connection attempt */
 	int acl;		/* which clients can use this server */
+#if 0
 	int port;
 	struct in_addr addr;
+#else
+	struct sockaddr addr;
+#endif
 	int c;			/* connections */
 	int weight;		/* default 1 */
 	int prio;
@@ -121,7 +134,11 @@ typedef struct {
 
 typedef struct {
 	time_t last;		/* last time this client made a connection */
+#if 0
 	struct in_addr addr;	/* of client */
+#else
+	pen_addr addr;
+#endif
 	int cno;		/* server used last time */
 	long connects;
 	long long csx, crx;
@@ -132,7 +149,7 @@ typedef struct {
 } ace_ipv4;
 
 typedef struct {
-	char ip[INET6_ADDRSTRLEN];
+	struct in6_addr ip;
 	unsigned char len;
 } ace_ipv6;
 
@@ -219,41 +236,7 @@ static char *proto = "tcp";
 
 static struct sigaction alrmaction, hupaction, termaction, usr1action;
 
-static unsigned char mask_ipv6[][8] = {
-	{0, 0, 0, 0, 0, 0, 0, 0}, {128, 0, 0, 0, 0, 0, 0, 0},
-	{192, 0, 0, 0, 0, 0, 0, 0}, {224, 0, 0, 0, 0, 0, 0, 0},
-	{240, 0, 0, 0, 0, 0, 0, 0}, {248, 0, 0, 0, 0, 0, 0, 0},
-	{252, 0, 0, 0, 0, 0, 0, 0}, {254, 0, 0, 0, 0, 0, 0, 0},
-	{255, 0, 0, 0, 0, 0, 0, 0}, {255, 128, 0, 0, 0, 0, 0, 0},
-	{255, 192, 0, 0, 0, 0, 0, 0}, {255, 224, 0, 0, 0, 0, 0, 0},
-	{255, 240, 0, 0, 0, 0, 0, 0}, {255, 248, 0, 0, 0, 0, 0, 0},
-	{255, 252, 0, 0, 0, 0, 0, 0}, {255, 254, 0, 0, 0, 0, 0, 0},
-	{255, 255, 0, 0, 0, 0, 0, 0}, {255, 255, 128, 0, 0, 0, 0, 0},
-	{255, 255, 192, 0, 0, 0, 0, 0}, {255, 255, 224, 0, 0, 0, 0, 0},
-	{255, 255, 240, 0, 0, 0, 0, 0}, {255, 255, 248, 0, 0, 0, 0, 0},
-	{255, 255, 252, 0, 0, 0, 0, 0}, {255, 255, 254, 0, 0, 0, 0, 0},
-	{255, 255, 255, 0, 0, 0, 0, 0}, {255, 255, 255, 128, 0, 0, 0, 0},
-	{255, 255, 255, 192, 0, 0, 0, 0}, {255, 255, 255, 224, 0, 0, 0, 0},
-	{255, 255, 255, 240, 0, 0, 0, 0}, {255, 255, 255, 248, 0, 0, 0, 0},
-	{255, 255, 255, 252, 0, 0, 0, 0}, {255, 255, 255, 254, 0, 0, 0, 0},
-	{255, 255, 255, 255, 0, 0, 0, 0}, {255, 255, 255, 255, 128, 0, 0, 0},
-	{255, 255, 255, 255, 192, 0, 0, 0}, {255, 255, 255, 255, 224, 0, 0, 0},
-	{255, 255, 255, 255, 240, 0, 0, 0}, {255, 255, 255, 255, 248, 0, 0, 0},
-	{255, 255, 255, 255, 252, 0, 0, 0}, {255, 255, 255, 255, 254, 0, 0, 0},
-	{255, 255, 255, 255, 255, 0, 0, 0}, {255, 255, 255, 255, 255, 128, 0, 0},
-	{255, 255, 255, 255, 255, 192, 0, 0}, {255, 255, 255, 255, 255, 224, 0, 0},
-	{255, 255, 255, 255, 255, 240, 0, 0}, {255, 255, 255, 255, 255, 248, 0, 0},
-	{255, 255, 255, 255, 255, 252, 0, 0}, {255, 255, 255, 255, 255, 254, 0, 0},
-	{255, 255, 255, 255, 255, 255, 0, 0}, {255, 255, 255, 255, 255, 255, 128, 0},
-	{255, 255, 255, 255, 255, 255, 192, 0}, {255, 255, 255, 255, 255, 255, 224, 0},
-	{255, 255, 255, 255, 255, 255, 240, 0}, {255, 255, 255, 255, 255, 255, 248, 0},
-	{255, 255, 255, 255, 255, 255, 252, 0}, {255, 255, 255, 255, 255, 255, 254, 0},
-	{255, 255, 255, 255, 255, 255, 255, 0}, {255, 255, 255, 255, 255, 255, 255, 128},
-	{255, 255, 255, 255, 255, 255, 255, 192}, {255, 255, 255, 255, 255, 255, 255, 224},
-	{255, 255, 255, 255, 255, 255, 255, 240}, {255, 255, 255, 255, 255, 255, 255, 248},
-	{255, 255, 255, 255, 255, 255, 255, 252}, {255, 255, 255, 255, 255, 255, 255, 254},
-	{255, 255, 255, 255, 255, 255, 255, 255}
-};
+static unsigned char mask_ipv6[129][16];
 
 static void close_conn(int);
 static void no_response(void);
@@ -350,6 +333,25 @@ static char *pen_strcasestr(const char *haystack, const char *needle)
 		p++;
 	}
 	return NULL;
+}
+
+static void init_mask(void)
+{
+	unsigned char m6[16];
+	int i, j;
+
+	memset(m6, 0, sizeof m6);
+	for (i = 0; i < 129; i++) {
+		for (j = 15; j >= 0; j--) {
+			mask_ipv6[i][j] = m6[j];
+			m6[j] >>= 1;
+			if (j > 0) {
+				m6[j] |= (m6[j-1] << 7);
+			} else {
+				m6[j] |= (1 << 7);
+			}
+		}
+	}
 }
 
 #ifdef HAVE_SSL
@@ -531,7 +533,7 @@ static void add_acl_ipv4(int a, unsigned int ip, unsigned int mask, unsigned cha
 	acls[a][i].ace.ipv4.mask = mask;
 }
 
-static void add_acl_ipv6(int a, char *ipaddr, unsigned char len, unsigned char permit)
+static void add_acl_ipv6(int a, unsigned char *ipaddr, unsigned char len, unsigned char permit)
 {
 	int i = add_acl(a, permit);
 
@@ -539,9 +541,12 @@ static void add_acl_ipv6(int a, char *ipaddr, unsigned char len, unsigned char p
 
 	if (debuglevel) {
 		debug("add_acl_ipv6(%d, %x, %d, %d)", a, ipaddr, len, permit);
+		debug("%x:%x:%x:%x:%x:%x:%x:%x/%d",
+			256*ipaddr[0]+ipaddr[1], 256*ipaddr[2]+ipaddr[3], 256*ipaddr[4]+ipaddr[5], 256*ipaddr[6]+ipaddr[7],
+			256*ipaddr[8]+ipaddr[9], 256*ipaddr[10]+ipaddr[11], 256*ipaddr[12]+ipaddr[13], 256*ipaddr[14]+ipaddr[15],  len);
 	}
 	acls[a][i].class = ACE_IPV6;
-	memcpy(acls[a][i].ace.ipv6.ip, ipaddr, INET6_ADDRSTRLEN);
+	memcpy(acls[a][i].ace.ipv6.ip.s6_addr, ipaddr, 16);
 	acls[a][i].ace.ipv6.len = len;
 }
 
@@ -663,6 +668,7 @@ static void webstats(void)
 		"<td bgcolor=\"#80f080\">prio</td>\n"
 		"</tr>\n");
 	for (i = 0; i < nservers; i++) {
+		struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[i].addr;
 		fprintf(fp,
 			"<tr>\n"
 			"<td>%d</td>\n"
@@ -677,8 +683,8 @@ static void webstats(void)
 			"<td>%d</td>\n"
 			"<td>%d</td>\n"
 			"</tr>\n",
-			i, inet_ntoa(servers[i].addr),
-			servers[i].status, servers[i].port,
+			i, inet_ntoa(a4->sin_addr),
+			servers[i].status, ntohs(a4->sin_port),
 			servers[i].c, servers[i].maxc, servers[i].hard,
 			servers[i].sx, servers[i].rx,
 			servers[i].weight, servers[i].prio);
@@ -710,7 +716,7 @@ static void webstats(void)
 			"<td>%lld</td>\n"
 			"<td>%lld</td>\n"
 			"</tr>\n",
-			i, inet_ntoa(clients[i].addr),
+			i, pen_ntoa(clients[i].addr),
 			(long)(now-clients[i].last), clients[i].cno, clients[i].connects,
 			clients[i].csx, clients[i].crx);
 	}
@@ -767,14 +773,15 @@ static void textstats(void)
 	debug("Time %s, %d servers, %d current",
 		nowstr, nservers, current);
 	for (i = 0; i < nservers; i++) {
+		struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[i].addr;
 		debug("Server %d status:\n"
 			"address %s\n"
 			"%d\n"
 			"port %d\n"
 			"%d connections (%d soft, %d hard)\n"
 			"%llu sent, %llu received\n",
-			i, inet_ntoa(servers[i].addr),
-			servers[i].status, servers[i].port,
+			i, inet_ntoa(a4->sin_addr),
+			servers[i].status, ntohs(a4->sin_port),
 			servers[i].c, servers[i].maxc, servers[i].hard,
 			servers[i].sx, servers[i].rx);
 	}
@@ -906,7 +913,7 @@ static void dump(unsigned char *p, int n)
 	fprintf(stderr, "\n");
 }
 
-
+/* return port number in host byte order */
 static int getport(char *p, char *proto)
 {
 	struct servent *s = getservbyname(p, proto);
@@ -919,6 +926,7 @@ static int getport(char *p, char *proto)
 
 static void setipaddress(struct in_addr *a, char *p)
 {
+#if 1	/* obsolete */
 	struct hostent *h = gethostbyname(p);
 	if (h == NULL) {
 		if ((a->s_addr = inet_addr(p)) == -1) {
@@ -927,34 +935,136 @@ static void setipaddress(struct in_addr *a, char *p)
 	} else {
 		memcpy(a, h->h_addr, h->h_length);
 	}
+#else
+	struct addrinfo *ai;
+	struct addrinfo hints;
+	int n;
+	char *port = NULL;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_flags = AI_ADDRCONFIG;
+	hints.ai_socktype = SOCK_STREAM;
+	n = getaddrinfo(p, port, &hints, &ai);
+	if (n != 0) {
+		debug("getaddrinfo: %s", gai_strerror(n));
+		return;
+	}
+	if (debuglevel) {
+		debug("family = %d", ai->ai_family);
+		debug("socktype = %d", ai->ai_socktype);
+		debug("protocol = %d", ai->ai_protocol);
+		debug("addrlen = %d", (int)ai->ai_addrlen);
+		debug("sockaddr = %p", ai->ai_addr);
+		debug("canonname = %s", ai->ai_canonname);
+	}
+/*
+       The addrinfo structure used by getaddrinfo() contains the following fields:
+
+           struct addrinfo {
+               int              ai_flags;
+               int              ai_family;
+               int              ai_socktype;
+               int              ai_protocol;
+               socklen_t        ai_addrlen;
+               struct sockaddr *ai_addr;
+               char            *ai_canonname;
+               struct addrinfo *ai_next;
+           };
+	The ai_addr is a struct sockaddr *
+	So what does that look like?
+
+struct sockaddr {
+    unsigned short    sa_family;    // address family, AF_xxx
+    char              sa_data[14];  // 14 bytes of protocol address
+};
+
+
+// IPv4 AF_INET sockets:
+
+struct sockaddr_in {
+    short            sin_family;   // e.g. AF_INET, AF_INET6
+    unsigned short   sin_port;     // e.g. htons(3490)
+    struct in_addr   sin_addr;     // see struct in_addr, below
+    char             sin_zero[8];  // zero this if you want to
+};
+
+struct in_addr {
+    unsigned long s_addr;          // load with inet_pton()
+};
+
+
+// IPv6 AF_INET6 sockets:
+
+struct sockaddr_in6 {
+    u_int16_t       sin6_family;   // address family, AF_INET6
+    u_int16_t       sin6_port;     // port number, Network Byte Order
+    u_int32_t       sin6_flowinfo; // IPv6 flow information
+    struct in6_addr sin6_addr;     // IPv6 address
+    u_int32_t       sin6_scope_id; // Scope ID
+};
+
+struct in6_addr {
+    unsigned char   s6_addr[16];   // load with inet_pton()
+};
+
+
+So why don't I use inet_pton?
+
+struct server currently has port and addr. In order to support ipv6
+this must be extended to address family. Then we have everything from
+sockaddr_in except the padding. So let's get rid of the struct in_addr
+field and the int port field and instead use a single struct sockaddr.
+Do this without adding any ipv6 code.
+
+	Copy address into *a
+*/
+	freeaddrinfo(ai);
+#endif
 }
 
+#if 0
 static void setaddress(struct in_addr *a, int *port, char *s,
 		int dp, int *maxc, int *hard, int *weight, int *prio, char *proto)
+#else
+static void setaddress(int server, char *s, int dp, char *proto)
+#endif
 {
-	struct hostent *h;
+//	struct hostent *h;
+	struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[server].addr;
+
 	char address[1024], pno[100];
 	int n = sscanf(s, "%999[^:]:%99[^:]:%d:%d:%d:%d",
-		address, pno, maxc, hard, weight, prio);
+		address, pno,
+		&servers[server].maxc, &servers[server].hard,
+		&servers[server].weight, &servers[server].prio);
 
-	if (n > 1) *port = getport(pno, proto);
-	else *port = dp;
-	if (n < 3) *maxc = 0;
-	if (n < 4) *hard = 0;
-	if (n < 5) *weight = 0;
-	if (n < 6) *prio = 0;
+	if (n > 1) a4->sin_port = htons(getport(pno, proto));
+	else a4->sin_port = dp;
+	if (n < 3) servers[server].maxc = 0;
+	if (n < 4) servers[server].hard = 0;
+	if (n < 5) servers[server].weight = 0;
+	if (n < 6) servers[server].prio = 0;
 
 	if (debuglevel)
 		debug("n = %d, address = %s, pno = %d, maxc1 = %d, hard = %d, weight = %d, prio = %d, proto = %s ",
-			n, address, *port, *maxc, *hard, *weight, *prio, proto);
+			n, address, ntohs(a4->sin_port), servers[server].maxc,
+			servers[server].hard, servers[server].weight,
+			servers[server].prio, proto);
 
+#if 0	/* obsolete */
 	if (!(h = gethostbyname(address))) {
-		if ((a->s_addr = inet_addr(address)) == -1) {
+		if ((a4->s_addr = inet_addr(address)) == -1) {
 			error("unknown or invalid address [%s]\n", address);
 		}
 	} else {
 		memcpy(a, h->h_addr, h->h_length);
 	}
+#else
+	if (inet_pton(AF_INET, address, &(a4->sin_addr))) {
+		error("unknown or invalid address [%s]\n", address);
+	}
+#endif
 }
 
 /* Log format is:
@@ -965,13 +1075,14 @@ static void netlog(int fd, int i, unsigned char *r, int n)
 {
 	int j, k;
 	char b[1024];
+	struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[conns[i].index].addr;
 	if (debuglevel) debug("netlog(%d, %d, %p, %d)", fd, i, r, n);
 	strcpy(b, "+ ");
 	k = 2;
 	strcpy(b+k, inet_ntoa(clients[conns[i].clt].addr));
 	k += strlen(b+k);
 	b[k++] = ' ';
-	strcpy(b+k, inet_ntoa(servers[conns[i].index].addr));
+	strcpy(b+k, inet_ntoa(a4->sin_addr));
 	k += strlen(b+k);
 	b[k++] = ' ';
 
@@ -995,10 +1106,11 @@ static void netlog(int fd, int i, unsigned char *r, int n)
 static void log_request(FILE *fp, int i, unsigned char *b, int n)
 {
 	int j;
+	struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[conns[i].index].addr;
 	if (n > KEEP_MAX) n = KEEP_MAX;
 	fprintf(fp, "%s ", inet_ntoa(clients[conns[i].clt].addr));
 	fprintf(fp, "%ld ", (long)time(NULL));
-	fprintf(fp, "%s ", inet_ntoa(servers[conns[i].index].addr));
+	fprintf(fp, "%s ", inet_ntoa(a4->sin_addr));
 	for (j = 0; j < n && b[j] != '\r' && b[j] != '\n'; j++) {
 		fprintf(fp, "%c", isascii(b[j])?b[j]:'.');
 	}
@@ -1438,10 +1550,7 @@ static void init(int argc, char **argv)
 	for (i = 1; i < argc; i++) {
 		servers[server].status = 0;
 		servers[server].c = 0;	/* connections... */
-		setaddress(&servers[server].addr, &servers[server].port,
-			argv[i], port,
-			&servers[server].maxc, &servers[server].hard,
-			&servers[server].weight, &servers[server].prio, proto);
+		setaddress(server, argv[i], port, proto);
 		servers[server].sx = 0;
 		servers[server].rx = 0;
 
@@ -1451,10 +1560,7 @@ static void init(int argc, char **argv)
 	while (nservers < servers_max) {
 		servers[server].status = 0;
 		servers[server].c = 0;	/* connections... */
-		setaddress(&servers[server].addr, &servers[server].port,
-			"0.0.0.0", 0,
-			&servers[server].maxc, &servers[server].hard,
-			&servers[server].weight, &servers[server].prio, proto);
+		setaddress(server, "0.0,0,0", 0, proto);
 		servers[server].sx = 0;
 		servers[server].rx = 0;
 
@@ -1465,10 +1571,7 @@ static void init(int argc, char **argv)
 		emerg_server = server;
 		servers[server].status = 0;
 		servers[server].c = 0;	/* connections... */
-		setaddress(&servers[server].addr, &servers[server].port,
-			   e_server, port,
-			   &servers[server].maxc, &servers[server].hard,
-			   &servers[server].weight, &servers[server].prio, proto);
+		setaddress(server, e_server, port, proto);
 		servers[server].sx = 0;
 		servers[server].rx = 0;
 		server++;
@@ -1478,10 +1581,7 @@ static void init(int argc, char **argv)
 		abuse_server = server;
 		servers[server].status = 0;
 		servers[server].c = 0;	/* connections... */
-		setaddress(&servers[server].addr, &servers[server].port,
-			   a_server, port,
-			   &servers[server].maxc, &servers[server].hard,
-			   &servers[server].weight, &servers[server].prio, proto);
+		setaddress(server, a_server, port, proto);
 		servers[server].sx = 0;
 		servers[server].rx = 0;
 		server++;
@@ -1505,8 +1605,9 @@ static void init(int argc, char **argv)
 	if (debuglevel) {
 		debug("servers:");
 		for (i = 0; i < nservers; i++) {
+			struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[i].addr;
 			debug("%2d %s:%d:%d:%d:%d:%d", i,
-				inet_ntoa(servers[i].addr), servers[i].port,
+				inet_ntoa(a4->sin_addr), ntohs(a4->sin_port),
 				servers[i].maxc, servers[i].hard,
 				servers[i].weight, servers[i].prio);
 		}
@@ -1522,9 +1623,10 @@ static int try_server(int index, int sticky, unsigned int cli_addr,
 	int n = 0;
 	int now = (int)time(NULL);
 	int optval = 1;
+	struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[index].addr;
 
 	if (debuglevel) debug("Trying server %d at time %d", index, now);
-	if (servers[index].port == 0) {
+	if (a4->sin_port == 0) {
 		if (debuglevel) debug("No port for you!");
 		return -1;
 	}
@@ -1550,8 +1652,8 @@ static int try_server(int index, int sticky, unsigned int cli_addr,
 	if (upfd < 0) error("Error opening socket: %d", errno);
 	memset(addr, 0, sizeof *addr);
 	addr->sin_family = AF_INET;
-	addr->sin_addr.s_addr = servers[index].addr.s_addr;
-	addr->sin_port = htons(servers[index].port);
+	addr->sin_addr.s_addr = a4->sin_addr.s_addr;
+	addr->sin_port = a4->sin_port;	// htons(servers[index].port);
 	setsockopt(upfd, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof optval);
 
 	sigaction(SIGALRM, &alrmaction, NULL);
@@ -1679,10 +1781,11 @@ static void write_cfg(char *p)
 	if (roundrobin) fprintf(fp, "roundrobin\n");
 	else fprintf(fp, "no roundrobin\n");
 	for (i = 0; i < nservers; i++) {
+		struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[i].addr;
 		fprintf(fp,
 			"server %d acl %d address %s port %d max %d hard %d",
 			i, servers[i].acl,
-			inet_ntoa(servers[i].addr), servers[i].port,
+			inet_ntoa(a4->sin_addr), ntohs(a4->sin_port),
 			servers[i].maxc, servers[i].hard);
 		if (weight) fprintf(fp, " weight %d", servers[i].weight);
 		if (prio) fprintf(fp, " prio %d", servers[i].prio);
@@ -1738,7 +1841,7 @@ static void do_cmd(char *b, void (*output)(char *, void *), void *op)
 				}
 				add_acl_geo(a, country, permit);
 			} else if (strchr(ip, ':')) {
-				char ipaddr[INET6_ADDRSTRLEN];
+				unsigned char ipaddr[INET6_ADDRSTRLEN];
 				ma = strchr(ip, '/');
 				if (ma) {
 					*ma++ = '\0';
@@ -1914,12 +2017,13 @@ static void do_cmd(char *b, void (*output)(char *, void *), void *op)
 		n = atoi(p);
 		if (n < 0 || n >= nservers) return;
 		while ((p = strtok(NULL, " ")) && (q = strtok(NULL, " "))) {
+			struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[n].addr;
 			if (!strcmp(p, "acl")) {
 				servers[n].acl = atoi(q);
 			} else if (!strcmp(p, "address")) {
-				setipaddress(&servers[n].addr, q);
+				setipaddress(&(a4->sin_addr), q);
 			} else if (!strcmp(p, "port")) {
-				servers[n].port = atoi(q);
+				a4->sin_port = htons(atoi(q));
 			} else if (!strcmp(p, "max")) {
 				servers[n].maxc = atoi(q);
 			} else if (!strcmp(p, "hard")) {
@@ -1934,8 +2038,9 @@ static void do_cmd(char *b, void (*output)(char *, void *), void *op)
 		}
 	} else if (!strcmp(p, "servers")) {
 		for (n = 0; n < nservers; n++) {
+			struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[n].addr;
 			sprintf(b, "%d addr %s port %d conn %d max %d hard %d weight %d prio %d sx %llu rx %llu\n",
-				n, inet_ntoa(servers[n].addr), servers[n].port,
+				n, inet_ntoa(a4->sin_addr), ntohs(a4->sin_port),
 				servers[n].c, servers[n].maxc, servers[n].hard,
 				servers[n].weight, servers[n].prio,
 				servers[n].sx, servers[n].rx);
@@ -2202,9 +2307,14 @@ static int open_listener(char *a)
 	if (p) {
 		strncpy(b, a, sizeof b);
 		b[sizeof b-1] = '\0';
-		p = strchr(b, ':');
+		p = strrchr(b, ':');
 		*p = '\0';
 		port = getport(p+1, proto);
+		p = strchr(b, ':');
+		if (p) {
+			debug("This looks like an IPv6 address, you nutjob.");
+			return -1;
+		}
 		setipaddress(&serv_addr.sin_addr, b);
 		snprintf(b, (sizeof(b) - 1), "%s", inet_ntoa(serv_addr.sin_addr));
 	} else {
@@ -3089,6 +3199,7 @@ int main(int argc, char **argv)
 
 	listenport = argv[0];
 	listenfd = open_listener(listenport);
+	init_mask();
 	init(argc, argv);
 
 	/* we must look up user id before chrooting */
