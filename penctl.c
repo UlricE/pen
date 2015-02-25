@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2000-2013  Ulric Eriksson <ulric@siag.nu>
+   Copyright (C) 2000-2014  Ulric Eriksson <ulric@siag.nu>
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -37,6 +37,7 @@
 #include <sys/wait.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -65,6 +66,23 @@ static void usage(void)
 {
 	printf("usage: penctl host:port command\n");
 	exit(0);
+}
+
+static int open_unix_socket(char *path)
+{
+	int n, fd;
+	struct sockaddr_un serv_addr;
+
+	fd = socket(PF_UNIX, SOCK_STREAM, 0);
+	if (fd < 0) error("error opening socket");
+	memset(&serv_addr, 0, sizeof serv_addr);
+	serv_addr.sun_family = AF_UNIX;
+	snprintf(serv_addr.sun_path, sizeof serv_addr.sun_path, "%s", path);
+	n = connect(fd, (struct sockaddr *)&serv_addr, sizeof serv_addr);
+	if (n == -1) {
+		error("error connecting to server");
+	}
+	return fd;
 }
 
 static int open_socket(char *addr, char *port)
@@ -130,17 +148,21 @@ int main(int argc, char **argv)
 		usage();
 	}
 
-	n = 1+strlen(argv[1]);	/* one for \0 */
-	if (n > sizeof b) error("Overlong arg '%s'", argv[1]);
-	strcpy(b, argv[1]);
-	/* We need the *last* : to allow such arguments as ::1:10080
-	   if pen's control port is ipv6 localhost:10080 */
-	p = strrchr(b, ':');
-	if (p == NULL) error("no port given");
+	if (strchr(argv[1], '/')) {
+		fd = open_unix_socket(argv[1]);
+	} else {
+		n = 1+strlen(argv[1]);	/* one for \0 */
+		if (n > sizeof b) error("Overlong arg '%s'", argv[1]);
+		strcpy(b, argv[1]);
+		/* We need the *last* : to allow such arguments as ::1:10080
+		   if pen's control port is ipv6 localhost:10080 */
+		p = strrchr(b, ':');
+		if (p == NULL) error("no port given");
 
-	*p++ = '\0';
+		*p++ = '\0';
 
-	fd = open_socket(b, p);
+		fd = open_socket(b, p);
+	}
 
 	n = 2+strlen(argv[2]);	/* one for \n, one for \0 */
 	if (n > sizeof b) error("Overlong arg '%s'", argv[2]);

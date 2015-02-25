@@ -1,6 +1,6 @@
 
-This is pen, a load balancer for "simple" tcp based protocols such as
-http or smtp. It allows several servers to appear as one to the
+This is pen, a load balancer for udp and tcp based protocols such as
+dns, http or smtp. It allows several servers to appear as one to the
 outside and automatically detects servers that are down and distributes
 clients among the available servers. This gives high availability and
 scalable performance.
@@ -27,10 +27,11 @@ can be eliminated by running pen on several servers, using vrrp to
 decide which is active.
 
 
-A side-effect of the load-balancing is that several logfiles are produced,
-and all accesses seem to come from the load balancer. The program
-penlogd solves this problem by merging pen's log file with the ones
-produced by the web servers. See penlogd(1) and penlog(1) for details.
+A side-effect of load-balancing web servers is that several logfiles
+are produced, and all accesses seem to come from the load balancer.
+The program penlogd solves this problem by merging pen's log file
+with the ones produced by the web servers. See penlogd(1) and penlog(1)
+for details.
 
 This load balancer is known to work on FreeBSD, Linux, HP-UX and Solaris.
 Other Unixes should work as well, possibly requiring trivial changes.

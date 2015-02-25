@@ -1,4 +1,159 @@
 
+150225	New feature: dummy server. Rather than acting as a proxy,
+	Pen will pretend to be a web server with just barely enough
+	functionality to work as a test target.
+	Penctl: dummy|no dummy.
+
+150224	Yet Another command: abort_on_error|no abort_on_error makes
+	Pen call abort() (or not) when encountering a fatal error.
+
+150224	New feature: "reliable idling". Pen will make and maintain a
+	number of idle connections to the backend servers. When a connection
+	closes, a new one is made (hence "reliable"). Penctl: idlers [N].
+
+150223	In do_cmd: return diagnostics to penctl so the user can see them,
+	instead of uselessly sending them to syslog.
+
+150223	New penctl commands:
+	socket N (print which connection the socket belongs to)
+	connection N (print info on the specified connection)
+	close N (forcibly close connection N)
+
+150219	In open_listener: check that the requested port is in range.
+	Fixed bug in dlist_insert.
+	Released 0.27.1.
+
+150215	Even load distribution when a server is unavailable.
+
+150212	Let pen save the settings for tcp_nodelay and tcp_fastclose.
+	Make flush_up and flush_down return the correct value on error.
+
+150212	Added config.h.win with reasonable settings for Windows.
+	Released 0.27.0.
+
+150211	Better detection and blacklisting of unavailable servers.
+
+150209	New penctl commands:
+	tcp_nodelay sets TCP_NODELAY on sockets. Turn off with no tcp_nodelay.
+	tcp_fastclose closes both upstream and downstream sockets if one of them
+	closes theirs. Will take the values up, down, both or off (default).
+
+150208	Rather than making a table of pending connections every time through
+	the main loop, keep them in a doubly linked list which is only updated
+	as needed. O(n) -> O(1).
+
+150207	A bug in udp mode: after successful "connect", do not event_add downfd,
+	because it is equal to listenfd and epoll_ctl doesn't like that.
+
+150206	Module kqueue.c updated.
+	Module poll.c: set unused fd:s to -1, or Solaris will say ENOSYS.
+
+150205	Enable diagnostic messages by default in configure.ac.
+	Changed event bookkeeping from stateless to stateful.
+	Made keepalive optional and added "keepalive / no keepalive" penctl command.
+
+150204	Added windows.c and pen.h to the release tarball.
+	Released 0.26.1.
+
+150204	Released 0.26.0.
+
+150203	More sensible autoconfiguration defaults: poll, kqueue, epoll, openssl and geoip
+	are built if found unless explicitly excluded.
+	New event management defaults: kqueue, epoll, poll, select in that order.
+	New penctl commands: kqueue, epoll, poll, select.
+	New command line option: -O cmd where cmd is any penctl command.
+	E.g. -O select to use select instead of the compiled-in default.
+
+150127	New penctl option "listen [address:]port" to allow listening address
+	to be changed on the fly or via a configuration file.
+	New pen options -i and -u to install and uninstall Pen as a Windows service.
+	See pen manpage.
+	Reduced default timeout to 3 seconds.
+
+150126	New autoconf option --enable-debugging to enable debugging code.
+	Lots of fixes for compatibility with Windows.
+	Released 0.26.0beta2.
+
+150123	Fixed bug in mainloop which kept trying to write 0 bytes.
+	MinGW port. Use Makefile.win to compile.
+
+150121	Event management code broken out into select.c, poll.c, kqueue.c and epoll.c.
+
+150113	New command-line option -m to accept multiple incoming connections in a batch.
+	New command-line option -q to set incoming pending connection queue length.
+
+150112	Close upfd when failing over.
+
+150109	Released 0.26.0beta1.
+	Adjusted debug logging levels.
+
+150108	Started on epoll support for Linux.
+
+150107	Rewrote output_net and output_file to take a variable number of arguments.
+	Handle timed out connection attempts in mainloop_kqueue.
+
+150105	Fixed mainloop_kqueue.
+
+150103	A lot of code broken out from mainloop_select into separate functions.
+	Fixed mainloop_poll.
+
+150102	Bugfixes related to the new backend connection logic.
+
+141229	Cleaned up and simplified add_client() and associated circuitry.
+	Connections to back end servers are now nonblocking and parallel.
+
+141217	Removed the -n option and all code explicitly using blocking sockets.
+	Removed the -D option and the "delayed forward" feature.
+
+141213	Renamed server and client fields in the conn, client and server structures
+	to better reflect what they are.
+	Restructured the add_client, store_client, store_conn and try_server
+	functions.
+
+140814	Allow write_cfg to save IPv6 and GeoIP access lists.
+	Released 0.25.1.
+
+140804	Fixed a bug in write_cfg, where Pen would try to write to an unwritable
+	file. Reported by Steven Myint
+
+140804	Released 0.25.0.
+
+140701	Return UDP replies from the server to the client.
+
+140621	UDP load balancing code restructured and bugfixed. Released 0.24.0.
+
+140616	Released 0.23.0.
+
+140417	In mainloop_select: When there is a pending connection, keep accepting
+	up to multi_accept times *or* until EAGAIN *or* connection table is full.
+	This improves performance under load.
+
+140414	Updated GeoIP support for IPv6.
+
+140410	Servers can have ipv6 addresses. It is possible to use a mix of ipv4
+	and ipv6 servers:
+	./pen -df -S 2 -r :::2222 [::1]:22 [127.0.0.1]:22
+
+140409	In order to allow server addresses with : in them (i.e. ipv6), it is now
+	possible to use square brackets around the address part of the server
+	specification: [address]:port (e.g. [::1]:8080).
+
+140408	Pen can now listen on ipv6 sockets in addition to ipv4 and unix ones.
+	I.e. things like "pen ::1:2222 127.0.0.1:22" are now possible.
+
+140402	snprintf format errors reported by Christopher Meng fixed in
+	pen.c and penctl.c.
+	Released 0.22.1.
+
+140331	Updated pen manpage to clarify what the control socket does.
+	Resist opening control socket running as root.
+	Remove the default file name for web log.
+	New feature: unix domain listening sockets.
+	Released 0.22.0.
+
+140221	Redesigned server and client structs to allow ipv6 addresses and require
+	less casting (yuck) in the code.
+
 140205	Updated penctl man page with syntax for IPv6 and GeoIP access lists.
 	Fixed cosmetic signedness compiler warnings.
 

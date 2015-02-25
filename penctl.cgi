@@ -64,9 +64,9 @@ statuspage()
 	test -z "$SERVER" && errorpage "No server"
 	test -z "$PORT" && errorpage "No port"
 
-	$PENCTL $SERVER:$PORT status 2> /tmp/penctl.cgi
+	$PENCTL $SERVER:$PORT status 2> /path/to/tmp/penctl.cgi
 	if test "$?" != "0"; then
-		errorpage "`cat /tmp/penctl.cgi`"
+		errorpage "`cat /path/to/tmp/penctl.cgi`"
 	fi
 	 echo "<form>"                                                          
                   echo '<input type="hidden" name="server" value="'$SERVER'">'   
@@ -286,6 +286,10 @@ EOF
 
 echo Content-type: text/html
 echo
+
+echo "This script has not been updated in many years and is unfit for public consumption"
+
+exit
 
 SERVER=`get_query server`
 PORT=`get_query port`

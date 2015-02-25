@@ -1,129 +1,131 @@
+/* config.h.  Generated from config.h.in by configure.  */
 /* config.h.in.  Generated from configure.ac by autoheader.  */
 
 /* #undef FD_SETSIZE */
-#undef FD_SETSIZE
+/* #undef FD_SETSIZE */
+#define FD_SETSIZE 1024
 
 /* #undef HAVE_ACCEPT4 */
-#undef HAVE_ACCEPT4
+//#define HAVE_ACCEPT4 1
 
 /* #undef HAVE_DAEMON */
-#undef HAVE_DAEMON
+/* #undef HAVE_DAEMON */
 
 /* Define to 1 if you have the <dirent.h> header file, and it defines `DIR'.
    */
-#undef HAVE_DIRENT_H
+#define HAVE_DIRENT_H 1
 
 /* #undef HAVE_EPOLL */
-#undef HAVE_EPOLL
+//#define HAVE_EPOLL 1
 
 /* #undef HAVE_GETADDRINFO */
-#undef HAVE_GETADDRINFO
+#define HAVE_GETADDRINFO 1
 
 /* Define to 1 if you have the <inttypes.h> header file. */
-#undef HAVE_INTTYPES_H
+#define HAVE_INTTYPES_H 1
 
 /* #undef HAVE_KQUEUE */
-#undef HAVE_KQUEUE
+/* #undef HAVE_KQUEUE */
 
 /* Define to 1 if you have the `crypto' library (-lcrypto). */
-#undef HAVE_LIBCRYPTO
+#define HAVE_LIBCRYPTO 1
 
 /* Define to 1 if you have the `GeoIP' library (-lGeoIP). */
-#undef HAVE_LIBGEOIP
+//#define HAVE_LIBGEOIP 1
 
 /* Define to 1 if you have the `nsl' library (-lnsl). */
-#undef HAVE_LIBNSL
+#define HAVE_LIBNSL 1
 
 /* Define to 1 if you have the `resolv' library (-lresolv). */
-#undef HAVE_LIBRESOLV
+#define HAVE_LIBRESOLV 1
 
 /* Define to 1 if you have the `socket' library (-lsocket). */
-#undef HAVE_LIBSOCKET
+/* #undef HAVE_LIBSOCKET */
 
 /* Define to 1 if you have the `ssl' library (-lssl). */
-#undef HAVE_LIBSSL
+//#define HAVE_LIBSSL 1
 
 /* Define to 1 if you have the <memory.h> header file. */
-#undef HAVE_MEMORY_H
+#define HAVE_MEMORY_H 1
 
 /* Define to 1 if you have the <ndir.h> header file, and it defines `DIR'. */
-#undef HAVE_NDIR_H
+/* #undef HAVE_NDIR_H */
 
 /* #undef HAVE_POLL */
-#undef HAVE_POLL
+//#define HAVE_POLL 1
 
 /* Define to 1 if you have the <stdint.h> header file. */
-#undef HAVE_STDINT_H
+#define HAVE_STDINT_H 1
 
 /* Define to 1 if you have the <stdlib.h> header file. */
-#undef HAVE_STDLIB_H
+#define HAVE_STDLIB_H 1
 
 /* Define to 1 if you have the <strings.h> header file. */
-#undef HAVE_STRINGS_H
+#define HAVE_STRINGS_H 1
 
 /* Define to 1 if you have the <string.h> header file. */
-#undef HAVE_STRING_H
+#define HAVE_STRING_H 1
 
 /* Define to 1 if you have the <sys/dir.h> header file, and it defines `DIR'.
    */
-#undef HAVE_SYS_DIR_H
+/* #undef HAVE_SYS_DIR_H */
 
 /* Define to 1 if you have the <sys/ndir.h> header file, and it defines `DIR'.
    */
-#undef HAVE_SYS_NDIR_H
+/* #undef HAVE_SYS_NDIR_H */
 
 /* Define to 1 if you have the <sys/select.h> header file. */
-#undef HAVE_SYS_SELECT_H
+#define HAVE_SYS_SELECT_H 1
 
 /* Define to 1 if you have the <sys/stat.h> header file. */
-#undef HAVE_SYS_STAT_H
+#define HAVE_SYS_STAT_H 1
 
 /* Define to 1 if you have the <sys/types.h> header file. */
-#undef HAVE_SYS_TYPES_H
+#define HAVE_SYS_TYPES_H 1
 
 /* Define to 1 if you have the <unistd.h> header file. */
-#undef HAVE_UNISTD_H
+#define HAVE_UNISTD_H 1
 
 /* Define to 1 if `major', `minor', and `makedev' are declared in <mkdev.h>.
    */
-#undef MAJOR_IN_MKDEV
+/* #undef MAJOR_IN_MKDEV */
 
 /* Define to 1 if `major', `minor', and `makedev' are declared in
    <sysmacros.h>. */
-#undef MAJOR_IN_SYSMACROS
+/* #undef MAJOR_IN_SYSMACROS */
 
 /* Name of package */
-#undef PACKAGE
+#define PACKAGE "pen"
 
 /* Define to the address where bug reports for this package should be sent. */
-#undef PACKAGE_BUGREPORT
+#define PACKAGE_BUGREPORT ""
 
 /* Define to the full name of this package. */
-#undef PACKAGE_NAME
+#define PACKAGE_NAME "pen"
 
 /* Define to the full name and version of this package. */
-#undef PACKAGE_STRING
+#define PACKAGE_STRING "pen 0.27.0"
 
 /* Define to the one symbol short name of this package. */
-#undef PACKAGE_TARNAME
+#define PACKAGE_TARNAME "pen"
 
 /* Define to the home page for this package. */
-#undef PACKAGE_URL
+#define PACKAGE_URL ""
 
 /* Define to the version of this package. */
-#undef PACKAGE_VERSION
+#define PACKAGE_VERSION "0.27.0"
 
 /* Define to 1 if you have the ANSI C header files. */
-#undef STDC_HEADERS
+#define STDC_HEADERS 1
 
 /* Define to 1 if you can safely include both <sys/time.h> and <time.h>. */
-#undef TIME_WITH_SYS_TIME
+#define TIME_WITH_SYS_TIME 1
 
 /* Define to 1 if your <sys/time.h> declares `struct tm'. */
-#undef TM_IN_SYS_TIME
+/* #undef TM_IN_SYS_TIME */
 
 /* Version number of package */
-#undef VERSION
+#define VERSION "0.27.0"
 
 /* Define to `unsigned int' if <sys/types.h> does not define. */
-#undef size_t
+/* #undef size_t */

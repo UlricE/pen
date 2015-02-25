@@ -12,31 +12,65 @@ make install
 Options
 -------
 
+TL;DR: ./configure without options is usually sufficient to figure out
+what is available and use the best combination.
+
+
 Most of the "generic" options are verbosely described below. Options
 that are specific to Pen include:
 
+  --enable-profiling      enable profiling
+
+Enable profiling with gprof. Most people have no interest in this.
+Disabled by default.
+
+  --enable-debugging      enable debugging messages
+
+With this enabled, more detailed diagnostics are built into Pen.
+Most people should have an interest in this, should something
+go wrong. Enabled by default.
+
+  --with-geoip            use libgeoip
+
+Build Pen with support for the GeoIP library. This provides access
+control lists that use country codes to permit or deny access.
+Built by default if available.
+
   --with-ssl=DIR          use SSL (default /usr/local/ssl)
 
-Build Pen with SSL support.
+Build Pen with SSL support. Built by default if available.
 
   --with-daemon           use daemon() if available
 
 The --with-daemon option specifies how Pen puts itself in the background.
 Some operating systems have a function called daemon() which does this;
-with this option, the function will be used.
+with this option, the function will be used. Built by default if available.
 
   --with-poll             use poll() if available
 
-Normally Pen uses the select() function to get notification when a socket
-is ready for reading or writing. This option enables an alternative method,
-using the poll() function. THIS IS CURRENTLY EXPERIMENTAL!
+Normally Pen uses the best available function to get notification
+when a socket is ready for reading or writing. On *BSD that is kqueue;
+on Linux it is epoll; on other Unix it is poll; on Windows it is select.
+This option enables using the poll() function.
+Built by default if available.
 
   --with-kqueue           use kqueue() if available
 
 The kqueue interface for event notification is available on *bsd
 and offers better performance than either select() or poll().
+Used by default if available.
+
+  --with-epoll            use epoll if available
+
+The epoll interface serves the same purpose on Linux as kqueue on BSD
+and is used by default if available.
 
   --with-fd_setsize=N     set FD_SETSIZE to N
+
+(This is only relevant if you use select() as the event notification
+mechanism. You will probably use something else, except on Windows
+where only select() is available. If not on Windows, consider this
+section irrelevant.)
 
 To use Pen with a very large number of simultaneous connections, the
 preprocessing macro FD_SETSIZE must be increased. The default value varies

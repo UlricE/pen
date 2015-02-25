@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2000-2014  Ulric Eriksson <ulric@siag.nu>
+   Copyright (C) 2000-2015  Ulric Eriksson <ulric@siag.nu>
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -22,11 +22,20 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <errno.h>
-#include <netdb.h>
 #include <sys/types.h>
 #include <assert.h>
+#ifndef WINDOWS
+#include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
+#include <sys/wait.h>
+#include <sys/resource.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <syslog.h>
+#include <pwd.h>
+#endif
 #include <signal.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -35,23 +44,12 @@
 #ifdef TIME_WITH_SYS_TIME
 #include <sys/time.h>
 #endif
-#include <sys/wait.h>
-#include <sys/resource.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
-#ifdef HAVE_POLL
-#include <sys/poll.h>
-#endif	/* HAVE_POLL */
-#ifdef HAVE_KQUEUE
-#include <sys/event.h>
-#endif
 #include <fcntl.h>
 #include <unistd.h>
-#include <syslog.h>
 #include <string.h>
-#include <pwd.h>
 
-#ifdef HAVE_SSL
+#ifdef HAVE_LIBSSL
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
@@ -68,12 +66,14 @@ static char *keyfile;
 static char *cacert_dir;
 static char *cacert_file;
 static SSL_CTX *ssl_context = NULL;
-#endif  /* HAVE_SSL */
+#endif  /* HAVE_LIBSSL */
 
-#ifdef HAVE_GEOIP
+#ifdef HAVE_LIBGEOIP
 #include <GeoIP.h>
-GeoIP *geoip;
+GeoIP *geoip4, *geoip6;
 #endif
+
+#include "pen.h"
 
 #define ACE_IPV4 (1)
 #define ACE_IPV6 (2)
@@ -85,40 +85,41 @@ GeoIP *geoip;
 #define SERVERS_MAX	16	/* max servers */
 #define ACLS_MAX	10	/* max acls */
 #define CONNECTIONS_MAX	256	/* max simultaneous connections */
-#define TIMEOUT		5	/* default timeout for non reachable hosts */
+#define TIMEOUT		3	/* default timeout for non reachable hosts */
 #define BLACKLIST_TIME	30	/* how long to shun a server that is down */
 #define TRACKING_TIME	0	/* how long a client is remembered */
 #define KEEP_MAX	100	/* how much to keep from the URI */
 #define WEIGHT_FACTOR	256	/* to make weight kick in earlier */
 
+/* Connection states, as used in struct conn */
+#define CS_UNUSED	(0)	/* not connected, unused slot */
+#define CS_IN_PROGRESS	(1)	/* connection in progress */
+#define CS_CONNECTED	(2)	/* successfully connected */
+#define CS_CLOSED_UP	(4)	/* we read eof from upfd */
+#define CS_CLOSED_DOWN	(8)	/* we read eof from downfd */
+#define CS_CLOSED	(CS_CLOSED_UP | CS_CLOSED_DOWN)
+
 typedef struct {
+	int state;		/* as per above */
+	time_t t;		/* time of connection attempt */
 	int downfd, upfd;
 	unsigned char *downb, *downbptr, *upb, *upbptr;
-	int downn, upn;
-	int clt;
-	struct sockaddr_in *addr_backend, *addr_listener, *addr_client;		/* for UDP only */
-	int index;		/* server index */
-#ifdef HAVE_KQUEUE
-	int i;			/* connection index */
-#endif
-#ifdef HAVE_SSL
+	int downn, upn;		/* pending bytes */
+	unsigned long ssx, srx;	/* server total sent, received */
+	unsigned long csx, crx;	/* client total sent, received */
+	int client;		/* client index */
+	int initial;		/* first server tried */
+	int server;		/* server index */
+	int pend;		/* node in pending_list */
+#ifdef HAVE_LIBSSL
 	SSL *ssl;
 #endif
 } connection;
 
 typedef struct {
-	unsigned short family;	/* AF_INET, AF_INET6 */
-	unsigned short port;	/* in host byte order */
-	union {
-		struct in_addr a4;
-		struct in6_addr a6;
-	} addr;
-} pen_addr;
-
-typedef struct {
 	int status;		/* last failed connection attempt */
 	int acl;		/* which clients can use this server */
-	pen_addr addr;
+	struct sockaddr_storage addr;
 	int c;			/* connections */
 	int weight;		/* default 1 */
 	int prio;
@@ -129,12 +130,8 @@ typedef struct {
 
 typedef struct {
 	time_t last;		/* last time this client made a connection */
-#if 0
-	struct in_addr addr;	/* of client */
-#else
-	pen_addr addr;
-#endif
-	int cno;		/* server used last time */
+	struct sockaddr_storage addr;
+	int server;		/* server used last time */
 	long connects;
 	long long csx, crx;
 } client;
@@ -160,12 +157,34 @@ typedef struct {
 		ace_ipv6 ipv6;
 		ace_geo geo;
 	} ace;
-#if 0
-	unsigned int ip, mask;
-	int permit;
-#endif
 } acl;
 
+void (*event_add)(int, int);
+void (*event_arm)(int, int);
+void (*event_delete)(int);
+void (*event_wait)(void);
+int (*event_fd)(int *);
+#if defined HAVE_KQUEUE
+void (*event_init)(void) = kqueue_init;
+#elif defined HAVE_EPOLL
+void (*event_init)(void) = epoll_init;
+#elif defined HAVE_POLL
+void (*event_init)(void) = poll_init;
+#else
+void (*event_init)(void) = select_init;
+#endif
+
+#define DUMMY_MSG "Ulric was here."
+
+static int abort_on_error = 0;
+static int dummy = 0;		/* use pen as a test target */
+static int idlers = 0, idlers_wanted = 0;
+static time_t now;
+static int tcp_nodelay = 0;
+static int tcp_fastclose = 0;
+static int pending_list = -1;	/* pending connections */
+static int listen_queue = 100;
+static int multi_accept = 100;
 static int nservers;		/* number of servers */
 static int current;		/* current server */
 static int nacls[ACLS_MAX];
@@ -177,19 +196,20 @@ static int emergency = 0;	/* are we using the emergency server? */
 static int abuse_server = -1;	/* server for naughty clients */
 static connection *conns;
 
-static int debuglevel;
+int debuglevel;
 static int asciidump;
 static int foreground;
 static int loopflag;
 static int exit_enabled = 0;
+static int keepalive = 0;
 
-
+static int hupcounter = 0;
 static int clients_max = CLIENTS_MAX;
 static int servers_max = SERVERS_MAX;
-static int connections_max = CONNECTIONS_MAX;
+int connections_max = CONNECTIONS_MAX;
 static int connections_used = 0;
 static int connections_last = 0;
-static int timeout = TIMEOUT;
+int timeout = TIMEOUT;
 static int blacklist_time = BLACKLIST_TIME;
 static int tracking_time = TRACKING_TIME;
 static int roundrobin = 0;
@@ -197,18 +217,13 @@ static int weight = 0;
 static int prio = 0;
 static int hash = 0;
 static int stubborn = 0;
-static int nblock = 1;
-static int delayed_forward = 0;
-static int do_stats = 0;
-static int do_restart_log = 0;
-static int use_poll = 0;
-static int use_kqueue = 0;
+
+static int stats_flag = 0;
+static int restart_log_flag = 0;
 static int http = 0;
 static int client_acl, control_acl;
 static int udp = 0;
-static int udpused = 0;
 static int protoid = SOCK_STREAM;
-//static int connection_ctrl = 0;
 
 static int port;
 
@@ -220,23 +235,258 @@ static int logsock = -1;
 static char *pidfile = NULL;
 static FILE *pidfp = NULL;
 static char *webfile = NULL;
-static char *listenport = NULL;
+static char listenport[1000];
 static char *ctrlport = NULL;
-static int listenfd, ctrlfd;
+static int listenfd, ctrlfd = -1;
 static char *e_server = NULL;
 static char *a_server = NULL;
 static char *jail = NULL;
 static char *user = NULL;
 static char *proto = "tcp";
 
-static struct sigaction alrmaction, hupaction, termaction, usr1action;
+static int fd2conn_max = 0;
+static int *fd2conn;
 
 static unsigned char mask_ipv6[129][16];
 
 static void close_conn(int);
-static void no_response(void);
 
-static void debug(char *fmt, ...)
+#ifdef WINDOWS
+#define SHUT_WR SD_SEND		/* for shutdown */
+
+#define LOG_CONS	0
+#define LOG_USER	0
+#define LOG_ERR		0
+#define LOG_DEBUG	0
+
+#define CONNECT_IN_PROGRESS (WSAEWOULDBLOCK)
+#define WOULD_BLOCK(err) (err == WSAEWOULDBLOCK)
+
+static FILE *syslogfp;
+
+static void openlog(const char *ident, int option, int facility)
+{
+	syslogfp = fopen("syslog.txt", "a");
+}
+
+static void syslog(int priority, const char *format, ...)
+{
+	va_list ap;
+	va_start(ap, format);
+	if (syslogfp) {
+		vfprintf(syslogfp, format, ap);
+	}
+	va_end(ap);
+}
+
+static void closelog(void)
+{
+	fclose(syslogfp);
+}
+
+#define SIGHUP	0
+#define SIGUSR1	0
+#define SIGPIPE	0
+#define SIGCHLD	0
+
+typedef int sigset_t;
+typedef int siginfo_t;
+
+struct sigaction {
+	void     (*sa_handler)(int);
+	void     (*sa_sigaction)(int, siginfo_t *, void *);
+	sigset_t   sa_mask;
+	int        sa_flags;
+	void     (*sa_restorer)(void);
+};
+
+static int sigaction(int signum, const struct sigaction *act,
+		struct sigaction *oldact)
+{
+	return 0;
+}
+
+static int sigemptyset(sigset_t *set)
+{
+	return 0;
+}
+
+typedef int rlim_t;
+
+struct rlimit {
+	rlim_t rlim_cur;
+	rlim_t rlim_max;
+};
+
+#define RLIMIT_CORE 0
+
+static int getrlimit(int resource, struct rlimit *rlim)
+{
+	return 0;
+}
+
+static int setrlimit(int resource, const struct rlimit *rlim)
+{
+	return 0;
+}
+
+typedef int uid_t;
+typedef int gid_t;
+
+static uid_t getuid(void)
+{
+	return 0;
+}
+
+struct passwd {
+	uid_t pw_uid;
+	gid_t pw_gid;
+};
+
+static struct passwd *getpwnam(const char *name)
+{
+	static struct passwd p;
+	p.pw_uid = 0;
+	p.pw_gid = 0;
+	return &p;
+}
+
+static int chroot(const char *path)
+{
+	return 0;
+}
+
+static int setgid(gid_t gid)
+{
+	return 0;
+}
+
+static int setuid(uid_t uid)
+{
+	return 0;
+}
+
+int inet_aton(const char *cp, struct in_addr *addr)
+{
+	addr->s_addr = inet_addr(cp);
+	return (addr->s_addr == INADDR_NONE) ? 0 : 1;
+}
+
+static void make_nonblocking(int fd)
+{
+	int i;
+	u_long mode = 1;
+	if ((i = ioctlsocket(fd, FIONBIO, &mode)) != NO_ERROR)
+		error("Can't ioctlsocket, error = %d", i);
+}
+
+static WSADATA wsaData;
+static int ws_started = 0;
+
+static int start_winsock(void)
+{
+	int n;
+	DEBUG(1, "start_winsock()");
+	if (!ws_started) {
+		n = WSAStartup(MAKEWORD(2, 2), &wsaData);
+		if (n != NO_ERROR) {
+			error("Error at WSAStartup() [%d]", WSAGetLastError());
+		} else {
+			DEBUG(2, "Winsock started");
+			ws_started = 1;
+		}
+	}
+	return ws_started;
+}
+
+void stop_winsock(void)
+{
+	WSACleanup();
+	ws_started = 0;
+}
+
+/* because Windows scribbles over errno in an uncalled-for manner */
+static int saved_errno;
+#define SAVE_ERRNO (saved_errno = socket_errno)
+#define USE_ERRNO (saved_errno)
+
+#else	/* not windows */
+#define CONNECT_IN_PROGRESS (EINPROGRESS)
+#define WOULD_BLOCK(err) (err == EAGAIN || err == EWOULDBLOCK)
+
+#ifndef HAVE_ACCEPT4
+static void make_nonblocking(int fd)
+{
+	int fl;
+	DEBUG(2, "make_nonblocking(%d)", fd);
+	if ((fl = fcntl(fd, F_GETFL, 0)) == -1)
+		error("Can't fcntl, errno = %d", errno);
+	if (fl & O_NONBLOCK) {
+		DEBUG(3, "fd %d is already nonblocking", fd);
+	} else {
+		DEBUG(4, "fd %d is not nonblocking", fd);
+		if (fcntl(fd, F_SETFL, fl | O_NONBLOCK) == -1) {
+			error("Can't fcntl, errno = %d", errno);
+		}
+	}
+}
+#endif
+
+#define SAVE_ERRNO
+#define USE_ERRNO (socket_errno)
+
+#endif
+
+/* enable/disable with "tcp_nodelay/no tcp_nodelay" */
+static void tcp_nodelay_on(int s)
+{
+#ifdef TCP_NODELAY
+	int one = 1;
+	int n = setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+	DEBUG(2, "setsockopt(%d, %d, %d, %p, %d) returns %d",
+		s, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one, n);
+#else
+	debug("You don't have TCP_NODELAY");
+#endif
+}
+
+/* save a few syscalls for modern Linux and BSD */
+static int socket_nb(int domain, int type, int protocol)
+{
+#ifdef SOCK_NONBLOCK
+	int s = socket(domain, type|SOCK_NONBLOCK, protocol);
+	SAVE_ERRNO;
+	DEBUG(2, "socket returns %d, socket_errno=%d", s, USE_ERRNO);
+	if (s == -1) error("Error opening socket: %s", strerror(USE_ERRNO));
+#else
+	int s = socket(domain, type, protocol);
+	SAVE_ERRNO;
+	DEBUG(2, "socket returns %d, socket_errno=%d", s, USE_ERRNO);
+	if (s == -1) error("Error opening socket: %s", strerror(USE_ERRNO));
+	make_nonblocking(s);
+#endif
+	if (tcp_nodelay) tcp_nodelay_on(s);
+	return s;
+}
+
+/* and a few more */
+extern int accept4(int, struct sockaddr *, socklen_t *, int);
+
+static int accept_nb(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
+{
+#ifdef HAVE_ACCEPT4
+	return accept4(sockfd, addr, addrlen, SOCK_NONBLOCK);
+#else
+	int s = accept(sockfd, addr, addrlen);
+	if (s != -1) make_nonblocking(sockfd);
+	return s;
+#endif
+	if (tcp_nodelay) tcp_nodelay_on(sockfd);
+}
+
+static struct sigaction alrmaction, hupaction, termaction, usr1action;
+
+void debug(char *fmt, ...)
 {
 	time_t now;
 	struct tm *nowtm;
@@ -258,24 +508,24 @@ static void debug(char *fmt, ...)
 	va_end(ap);
 }
 
-static void error(char *fmt, ...)
+void error(char *fmt, ...)
 {
 	char b[4096];
 	va_list ap;
 	va_start(ap, fmt);
 	vsnprintf(b, sizeof b, fmt, ap);
-	if (foreground) {
-		fprintf(stderr, "%s\n", b);
-	} else {
+	fprintf(stderr, "%s\n", b);
+	if (!foreground) {
 		openlog("pen", LOG_CONS, LOG_USER);
 		syslog(LOG_ERR, "%s\n", b);
 		closelog();
 	}
 	va_end(ap);
-	exit(1);
+	if (abort_on_error) abort();
+	else exit(EXIT_FAILURE);
 }
 
-static void *pen_malloc(size_t n)
+void *pen_malloc(size_t n)
 {
 	void *q = malloc(n);
 	if (!q) error("Can't malloc %ld bytes", (long)n);
@@ -289,7 +539,7 @@ static void *pen_calloc(size_t n, size_t s)
 	return q;
 }
 
-static void *pen_realloc(void *p, size_t n)
+void *pen_realloc(void *p, size_t n)
 {
 	void *q = realloc(p, n);
 	if (!q) error("Can't realloc %ld bytes", (long)n);
@@ -330,6 +580,28 @@ static char *pen_strcasestr(const char *haystack, const char *needle)
 	return NULL;
 }
 
+/* store_conn does fd2conn_set(fd, conn) */
+/* close_conn does fd2conn_set(fd, -1) */
+static void fd2conn_set(int fd, int conn)
+{
+	DEBUG(3, "fd2conn_set(fd=%d, conn=%d)", fd, conn);
+	if (fd < 0) error("fd2conn_set(fd = %d, conn = %d)", fd, conn);
+	if (fd >= fd2conn_max) {
+		int i, new_max = fd+10000;
+		DEBUG(2, "expanding fd2conn to %d bytes", new_max);
+		fd2conn = pen_realloc(fd2conn, new_max * sizeof *fd2conn);
+		for (i = fd2conn_max; i < new_max; i++) fd2conn[i] = -1;
+		fd2conn_max = new_max;
+	}
+	fd2conn[fd] = conn;
+}
+
+static int fd2conn_get(int fd)
+{
+	if (fd < 0 || fd >= fd2conn_max) return -1;
+	return fd2conn[fd];
+}
+
 static void init_mask(void)
 {
 	unsigned char m6[16];
@@ -349,14 +621,214 @@ static void init_mask(void)
 	}
 }
 
-static char *pen_ntoa(pen_addr *a)
+static int pen_hash(struct sockaddr_storage *a)
+{
+	struct sockaddr_in *si;
+	struct sockaddr_in6 *si6;
+	unsigned char *u;
+
+	switch (a->ss_family) {
+	case AF_INET:
+		si = (struct sockaddr_in *)a;
+		return si->sin_addr.s_addr % nservers;
+	case AF_INET6:
+		si6 = (struct sockaddr_in6 *)a;
+		u = (unsigned char *)(&si6->sin6_addr);
+		return u[15] % nservers;
+	default:
+		return 0;
+	}
+}
+
+/* Takes a struct sockaddr_storage and returns the port number in host order.
+   For a Unix socket, the port number is 1.
+*/
+static int pen_getport(struct sockaddr_storage *a)
+{
+	struct sockaddr_in *si;
+	struct sockaddr_in6 *si6;
+
+	switch (a->ss_family) {
+	case AF_UNIX:
+		return 1;
+	case AF_INET:
+		si = (struct sockaddr_in *)a;
+		return ntohs(si->sin_port);
+	case AF_INET6:
+		si6 = (struct sockaddr_in6 *)a;
+		return ntohs(si6->sin6_port);
+	default:
+		debug("pen_getport: Unknown address family %d", a->ss_family);
+	}
+	return 0;
+}
+
+static int pen_setport(struct sockaddr_storage *a, int port)
+{
+	struct sockaddr_in *si;
+	struct sockaddr_in6 *si6;
+
+	switch (a->ss_family) {
+	case AF_UNIX:
+		/* No port for Unix domain sockets */
+		return 1;
+	case AF_INET:
+		si = (struct sockaddr_in *)a;
+		si->sin_port = htons(port);
+		return 1;
+	case AF_INET6:
+		si6 = (struct sockaddr_in6 *)a;
+		si6->sin6_port = htons(port);
+		return 1;
+	default:
+		debug("pen_setport: Unknown address family %d", a->ss_family);
+	}
+	return 0;
+}
+
+/* Takes a struct sockaddr_storage and returns the name in a static buffer.
+   The address can be a unix socket path or an ipv4 or ipv6 address.
+*/
+static char *pen_ntoa(struct sockaddr_storage *a)
 {
 	static char b[1024];
-	snprintf(b, sizeof b, "%s", inet_ntoa(a->addr.a4));
+	struct sockaddr_in *si;
+	struct sockaddr_in6 *si6;
+#ifndef WINDOWS
+	struct sockaddr_un *su;
+#endif
+
+	switch (a->ss_family) {
+	case AF_INET:
+		si = (struct sockaddr_in *)a;
+		snprintf(b, sizeof b, "%s", inet_ntoa(si->sin_addr));
+		break;
+	case AF_INET6:
+		si6 = (struct sockaddr_in6 *)a;
+		if (inet_ntop(AF_INET6, &si6->sin6_addr, b, sizeof b) == NULL) {
+			debug("pen_ntoa: can't convert address");
+			strncpy(b, "(cannot convert address)", sizeof b);
+		}
+		break;
+#ifndef WINDOWS
+	case AF_UNIX:
+		su = (struct sockaddr_un *)a;
+		snprintf(b, sizeof b, "%s", su->sun_path);
+		break;
+#endif
+	default:
+		debug("pen_ntoa: unknown address family %d", a->ss_family);
+		snprintf(b, sizeof b, "(unknown address family %d", a->ss_family);
+	}
 	return b;
 }
 
-#ifdef HAVE_SSL
+static void pen_dumpaddr(struct sockaddr_storage *a)
+{
+	switch (a->ss_family) {
+	case AF_INET:
+		debug("Family: AF_INET");
+		debug("Port: %d", pen_getport(a));
+		debug("Address: %s", pen_ntoa(a));
+		break;
+	case AF_INET6:
+		debug("Family: AF_INET6");
+		debug("Port: %d", pen_getport(a));
+		debug("Address: %s", pen_ntoa(a));
+		break;
+#ifndef WINDOWS
+	case AF_UNIX:
+		debug("Family: AF_UNIX");
+		debug("Path: %s", pen_ntoa(a));
+		break;
+#endif
+	default:
+		debug("pen_dumpaddr: Unknown address family %d", a->ss_family);
+	}
+}
+
+static int pen_ss_size(struct sockaddr_storage *ss)
+{
+	switch (ss->ss_family) {
+#ifndef WINDOWS
+	case AF_UNIX:
+		return sizeof(struct sockaddr_un);
+#endif
+	case AF_INET:
+		return sizeof(struct sockaddr_in);
+	case AF_INET6:
+		return sizeof(struct sockaddr_in6);
+	default:
+		debug("pen_ss_size: unknown address family %d", ss->ss_family);
+		return sizeof(struct sockaddr_storage);
+	}
+}
+
+/* Takes a name and fills in a struct sockaddr_storage. The port is left alone.
+   The address can be a unix socket path, a host name, an ipv4 address or an ipv6 address.
+   Returns 0 for failure and 1 for success.
+*/
+static int pen_aton(char *name, struct sockaddr_storage *addr)
+{
+	struct sockaddr_in *si;
+	struct sockaddr_in6 *si6;
+#ifndef WINDOWS
+	struct sockaddr_un *su;
+#endif
+	struct addrinfo *ai;
+	struct addrinfo hints;
+	int n, result;
+
+	DEBUG(2, "pen_aton(%s, %p)", name, addr);
+#ifndef WINDOWS
+	/* Deal with Unix domain sockets first */
+	if (strchr(name, '/')) {
+		addr->ss_family = AF_UNIX;
+		su = (struct sockaddr_un *)addr;
+		snprintf(su->sun_path, sizeof su->sun_path, "%s", name);
+		return 1;
+	}
+#endif
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_flags = AI_ADDRCONFIG;
+	hints.ai_socktype = SOCK_STREAM;
+	n = getaddrinfo(name, NULL, &hints, &ai);
+	if (n != 0) {
+		debug("getaddrinfo: %s", gai_strerror(n));
+		return 0;
+	}
+	DEBUG(2, "family = %d\nsocktype = %d\nprotocol = %d\n" \
+		"addrlen = %d\nsockaddr = %d\ncanonname = %s", \
+		ai->ai_family, ai->ai_socktype, ai->ai_protocol, \
+		(int)ai->ai_addrlen, ai->ai_addr, ai->ai_canonname);
+	addr->ss_family = ai->ai_family;
+	switch (ai->ai_family) {
+	case AF_INET:
+		si = (struct sockaddr_in *)addr;
+		/* ai->ai_addr is a struct sockaddr * */
+		/* (struct sockaddr_in *)ai->ai_addr is a struct sockaddr_in * */
+		/* ((struct sockaddr_in *)ai->ai_addr)->sin_addr is a struct in_addr */
+		si->sin_addr = ((struct sockaddr_in *)ai->ai_addr)->sin_addr;
+		result = 1;
+		break;
+	case AF_INET6:
+		si6 = (struct sockaddr_in6 *)addr;
+		/* ai->ai_addr is a struct sockaddr * */
+		/* (struct sockaddr_in6 *)ai->ai_addr is a struct sockaddr_in6 * */
+		/* ((struct sockaddr_in6 *)ai->ai_addr)->sin6_addr is a struct in6_addr */
+		si6->sin6_addr = ((struct sockaddr_in6 *)ai->ai_addr)->sin6_addr;
+		result = 1;
+		break;
+	default:
+		debug("Unknown family %d", ai->ai_family);
+		result = 0;
+		break;
+	}
+	freeaddrinfo(ai);
+	return result;
+}
+
+#ifdef HAVE_LIBSSL
 static int ssl_verify_cb(int ok, X509_STORE_CTX *ctx)
 {
 	char buffer[256];
@@ -505,7 +977,7 @@ static int ssl_init(void)
 	return 0;
 }
 
-#endif  /* HAVE_SSL */
+#endif  /* HAVE_LIBSSL */
 
 /* allocate ace and fill in the generics */
 static int add_acl(int a, unsigned char permit)
@@ -527,9 +999,7 @@ static void add_acl_ipv4(int a, unsigned int ip, unsigned int mask, unsigned cha
 
 	if (i == -1) return;
 
-	if (debuglevel) {
-		debug("add_acl_ipv4(%d, %x, %x, %d)", a, ip, mask, permit);
-	}
+	DEBUG(2, "add_acl_ipv4(%d, %x, %x, %d)", a, ip, mask, permit);
 	acls[a][i].class = ACE_IPV4;
 	acls[a][i].ace.ipv4.ip = ip;
 	acls[a][i].ace.ipv4.mask = mask;
@@ -541,12 +1011,11 @@ static void add_acl_ipv6(int a, unsigned char *ipaddr, unsigned char len, unsign
 
 	if (i == -1) return;
 
-	if (debuglevel) {
-		debug("add_acl_ipv6(%d, %x, %d, %d)", a, ipaddr, len, permit);
-		debug("%x:%x:%x:%x:%x:%x:%x:%x/%d",
-			256*ipaddr[0]+ipaddr[1], 256*ipaddr[2]+ipaddr[3], 256*ipaddr[4]+ipaddr[5], 256*ipaddr[6]+ipaddr[7],
-			256*ipaddr[8]+ipaddr[9], 256*ipaddr[10]+ipaddr[11], 256*ipaddr[12]+ipaddr[13], 256*ipaddr[14]+ipaddr[15],  len);
-	}
+	DEBUG(2, "add_acl_ipv6(%d, %x, %d, %d)\n" \
+		"%x:%x:%x:%x:%x:%x:%x:%x/%d", \
+		a, ipaddr, len, permit, \
+		256*ipaddr[0]+ipaddr[1], 256*ipaddr[2]+ipaddr[3], 256*ipaddr[4]+ipaddr[5], 256*ipaddr[6]+ipaddr[7], \
+		256*ipaddr[8]+ipaddr[9], 256*ipaddr[10]+ipaddr[11], 256*ipaddr[12]+ipaddr[13], 256*ipaddr[14]+ipaddr[15],  len);
 	acls[a][i].class = ACE_IPV6;
 	memcpy(acls[a][i].ace.ipv6.ip.s6_addr, ipaddr, 16);
 	acls[a][i].ace.ipv6.len = len;
@@ -558,18 +1027,14 @@ static void add_acl_geo(int a, char *country, unsigned char permit)
 
 	if (i == -1) return;
 
-	if (debuglevel) {
-		debug("add_acl_geo(%d, %s, %d", a, country, permit);
-	}
+	DEBUG(2, "add_acl_geo(%d, %s, %d", a, country, permit);
 	acls[a][i].class = ACE_GEO;
 	strncpy(acls[a][i].ace.geo.country, country, 2);
 }
 
 static void del_acl(int a)
 {
-	if (debuglevel) {
-		debug("del_acl(%d)", a);
-	}
+	DEBUG(2, "del_acl(%d)", a);
 	if (a < 0 || a >= ACLS_MAX) {
 		debug("del_acl: %d outside (0,%d)", a, ACLS_MAX);
 		return;
@@ -579,18 +1044,25 @@ static void del_acl(int a)
 	nacls[a] = 0;
 }
 
-/* client is an ipv4 address; to be continued... */
-static int match_acl_ipv4(int a, unsigned int client)
+#ifndef WINDOWS
+static int match_acl_unix(int a, struct sockaddr_un *cli_addr)
 {
+	DEBUG(2, "Unix acl:s not implemented");
+	return 1;
+}
+#endif
+
+static int match_acl_ipv4(int a, struct sockaddr_in *cli_addr)
+{
+	unsigned int client = cli_addr->sin_addr.s_addr;
 	int i;
 	int permit = 0;
 	acl *ap = acls[a];
+#ifdef HAVE_LIBGEOIP
 	const char *country = NULL;
 	int geo_done = 0;
-	struct in_addr *in = (struct in_addr *)&client;
-	if (debuglevel) {
-		debug("match_acl_ipv4(%d, %u)", a, client);
-	}
+#endif
+	DEBUG(2, "match_acl_ipv4(%d, %u)", a, client);
 	for (i = 0; i < nacls[a]; i++) {
 		permit = ap[i].permit;
 		switch (ap[i].class) {
@@ -599,19 +1071,13 @@ static int match_acl_ipv4(int a, unsigned int client)
 				return permit;
 			}
 			break;
-		case ACE_IPV6:
-			debug("ACE_IPV6: Not implemented");
-			break;
 		case ACE_GEO:
-#ifdef HAVE_GEOIP
-			if (geoip == NULL) break;
+#ifdef HAVE_LIBGEOIP
+			if (geoip4 == NULL) break;
 			if (!geo_done) {
-				country = GeoIP_country_code_by_addr(geoip,
-						inet_ntoa(*in));
-				if (debuglevel) {
-					if (country) debug("Country = %s", country);
-					else debug("Country unknown");
-				}
+				country = GeoIP_country_code_by_addr(geoip4,
+						pen_ntoa((struct sockaddr_storage *)cli_addr));
+				DEBUG(2, "Country = %s", country?country:"unknown");
 				geo_done = 1;
 			}
 			if (country && !strncmp(country,
@@ -623,15 +1089,102 @@ static int match_acl_ipv4(int a, unsigned int client)
 #endif
 			break;
 		default:
-			debug("Unknown ACE class %d (this is probably a bug)",
-				ap[i].class);
+			/* ignore other ACE classes (ipv6 et al) */
 			break;
 		}
 	}
 	return !permit;
 }
 
-static void webstats(void)
+/* The most straightforward way to get at the bytes of an ipv6 address
+   is to take the pointer to the in6_addr and cast it to a pointer to
+   unsigned char.
+*/
+static int match_acl_ipv6(int a, struct sockaddr_in6 *cli_addr)
+{
+	unsigned char *client = (unsigned char *)&(cli_addr->sin6_addr);
+	unsigned char *ip;
+	unsigned char *mask;
+	int len;
+	int i, j;
+	int permit = 0;
+	acl *ap = acls[a];
+#ifdef HAVE_LIBGEOIP
+	const char *country = NULL;
+	int geo_done = 0;
+#endif
+
+	DEBUG(2, "match_acl_ipv6(%d, %u)", a, client);
+	for (i = 0; i < nacls[a]; i++) {
+		permit = ap[i].permit;
+		switch (ap[i].class) {
+		case ACE_IPV6:
+			len = ap[i].ace.ipv6.len;
+			ip = (unsigned char *)&(ap[i].ace.ipv6.ip);
+			mask = mask_ipv6[len];
+
+			DEBUG(2, "Matching %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x against %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x / %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x", \
+				client[0], client[1], client[2], client[3], \
+				client[4], client[5], client[6], client[7], \
+				client[8], client[9], client[10], client[11], \
+				client[12], client[13], client[14], client[15], \
+				ip[0], ip[1], ip[2], ip[3], \
+				ip[4], ip[5], ip[6], ip[7], \
+				ip[8], ip[9], ip[10], ip[11], \
+				ip[12], ip[13], ip[14], ip[15], \
+				mask[0], mask[1], mask[2], mask[3], \
+				mask[4], mask[5], mask[6], mask[7], \
+				mask[8], mask[9], mask[10], mask[11], \
+				mask[12], mask[13], mask[14], mask[15]);
+
+			for (j = 0; j < 16; j++) {
+				if ((client[j] & mask[j]) != ip[j]) break;
+			}
+			if (j == 16) return permit;
+			break;
+		case ACE_GEO:
+#ifdef HAVE_LIBGEOIP
+			if (geoip6 == NULL) break;
+			if (!geo_done) {
+				country = GeoIP_country_code_by_addr_v6(geoip6,
+						pen_ntoa((struct sockaddr_storage *)cli_addr));
+				DEBUG(2, "Country = %s", country?country:"unknown");
+				geo_done = 1;
+			}
+			if (country && !strncmp(country,
+						ap[i].ace.geo.country, 2)) {
+				return permit;
+			}
+#else
+			debug("ACE_GEO: Not implemented");
+#endif
+			break;
+		default:
+			/* ignore other ACE classes (ipv4 et al) */
+			break;
+		}
+	}
+	return !permit;
+}
+
+static int match_acl(int a, struct sockaddr_storage *cli_addr)
+{
+	switch (cli_addr->ss_family) {
+#ifndef WINDOWS
+	case AF_UNIX:
+		return match_acl_unix(a, (struct sockaddr_un *)cli_addr);
+#endif
+	case AF_INET:
+		return match_acl_ipv4(a, (struct sockaddr_in *)cli_addr);
+	case AF_INET6:
+		return match_acl_ipv6(a, (struct sockaddr_in6 *)cli_addr);
+	default:
+		debug("match_acl: unknown address family %d", cli_addr->ss_family);
+	}
+	return 0;
+}
+
+static int webstats(void)
 {
 	FILE *fp;
 	int i;
@@ -639,8 +1192,15 @@ static void webstats(void)
 	struct tm *nowtm;
 	char nowstr[80];
 
+	if (webfile == NULL) {
+		debug("Don't know where to write web stats; see -w option");
+		return 0;
+	}
 	fp = fopen(webfile, "w");
-	if (fp == NULL) return;
+	if (fp == NULL) {
+		debug("Can't write to %s", webfile);
+		return 0;
+	}
 	now=time(NULL);
 	nowtm = localtime(&now);
 	strftime(nowstr, sizeof(nowstr), "%Y-%m-%d %H:%M:%S", nowtm);
@@ -684,8 +1244,8 @@ static void webstats(void)
 			"<td>%d</td>\n"
 			"<td>%d</td>\n"
 			"</tr>\n",
-			i, pen_ntoa(servers[i].addr),
-			servers[i].status, servers[i].addr.port,
+			i, pen_ntoa(&servers[i].addr),
+			servers[i].status, pen_getport(&servers[i].addr),
 			servers[i].c, servers[i].maxc, servers[i].hard,
 			servers[i].sx, servers[i].rx,
 			servers[i].weight, servers[i].prio);
@@ -718,7 +1278,7 @@ static void webstats(void)
 			"<td>%lld</td>\n"
 			"</tr>\n",
 			i, pen_ntoa(&clients[i].addr),
-			(long)(now-clients[i].last), clients[i].cno, clients[i].connects,
+			(long)(now-clients[i].last), clients[i].server, clients[i].connects,
 			clients[i].csx, clients[i].crx);
 	}
 	fprintf(fp, "</table>\n");
@@ -751,13 +1311,14 @@ static void webstats(void)
 			"</tr>\n",
 			i, conns[i].downfd, conns[i].upfd,
 			conns[i].downn, conns[i].upn,
-			conns[i].clt, conns[i].index);
+			conns[i].client, conns[i].server);
 	}
 	fprintf(fp, "</table>\n");
 	fprintf(fp,
 		"</body>\n"
 		"</html>\n");
 	fclose(fp);
+	return 1;
 }
 
 static void textstats(void)
@@ -780,8 +1341,8 @@ static void textstats(void)
 			"port %d\n"
 			"%d connections (%d soft, %d hard)\n"
 			"%llu sent, %llu received\n",
-			i, pen_ntoa(servers[i].addr),
-			servers[i].status, servers[i].addr.port,
+			i, pen_ntoa(&servers[i].addr),
+			servers[i].status, pen_getport(&servers[i].addr),
 			servers[i].c, servers[i].maxc, servers[i].hard,
 			servers[i].sx, servers[i].rx);
 	}
@@ -797,7 +1358,7 @@ static void textstats(void)
 			"sent  %llu\n",
 			"received  %llu\n",
 			i, pen_ntoa(&clients[i].addr),
-			(long)(now-clients[i].last), clients[i].cno, clients[i].connects,
+			(long)(now-clients[i].last), clients[i].server, clients[i].connects,
 			clients[i].csx, clients[i].crx);
 	}
 	debug("Max number of connections: %d", connections_max);
@@ -810,90 +1371,101 @@ static void textstats(void)
 			"client %d, server %d\n",
 			i, conns[i].downfd, conns[i].upfd,
 			conns[i].downn, conns[i].upn,
-			conns[i].clt, conns[i].index);
+			conns[i].client, conns[i].server);
 	}
 }
 
 
 static void stats(int dummy)
 {
-	do_stats=1;
+	DEBUG(1, "Caught USR1, will save stats");
+	stats_flag=1;
 	sigaction(SIGUSR1, &usr1action, NULL);
 }
 
 static void restart_log(int dummy)
 {
-	do_restart_log=1;
+	DEBUG(1, "Caught HUP, will read cfg");
+	restart_log_flag=1;
 	sigaction(SIGHUP, &hupaction, NULL);
 }
 
 static void quit(int dummy)
 {
+	DEBUG(1, "Quitting\nRead configuration %d times", hupcounter);
 	loopflag = 0;
 }
 
-/* Return index of known client, otherwise -1 */
-static int lookup_client(struct in_addr cli)
-{
-	int i;
-	unsigned long ad = cli.s_addr;
-	time_t now = time(NULL);
-
-	for (i = 0; i < clients_max; i++) {
-		if (clients[i].addr.addr.a4.s_addr == ad) break;
-	}
-	if (i == clients_max) i = -1;
-	else if (tracking_time > 0 && clients[i].last+tracking_time < now) {
-		/* too old, recycle */
-		clients[i].last = 0;
-		i = -1;
-	}
-	if (debuglevel) debug("Client %s has index %d", inet_ntoa(cli), i);
-	return i;
-}
-
 /* Store client and return index */
-static int store_client(int clino, struct in_addr cli, int ch)
+static int store_client(struct sockaddr_storage *cli)
 {
 	int i;
 	int empty = -1;		/* first empty slot */
 	int oldest = -1;	/* in case we need to recycle */
+	struct sockaddr_in *si;
+	struct sockaddr_in6 *si6;
+	int family = cli->ss_family;
+	unsigned long ad = 0;
+	void *ad6 = 0;
 
-	if (clino == -1) {
-		for (i = 0; i < clients_max; i++) {
-			if (clients[i].addr.addr.a4.s_addr == cli.s_addr) break; /* XXX */
-			if (empty != -1) continue;
-			if (clients[i].last == 0) {
-				empty = i;
-				continue;
+	if (family == AF_INET) {
+		si = (struct sockaddr_in *)cli;
+		ad = si->sin_addr.s_addr;
+	} else if (family == AF_INET6) {
+		si6 = (struct sockaddr_in6 *)cli;
+		ad6 = &si6->sin6_addr;
+	}
+
+	for (i = 0; i < clients_max; i++) {
+		/* look for client with same family and address */
+		if (family == clients[i].addr.ss_family) {
+			if (family == AF_UNIX) break;
+			if (family == AF_INET) {
+				si = (struct sockaddr_in *)&clients[i].addr;
+				if (ad == si->sin_addr.s_addr) break;
 			}
-			if (oldest == -1 || (clients[i].last < clients[oldest].last)) {
-				oldest = i;
+			if (family == AF_INET6) {
+				si6 = (struct sockaddr_in6 *)&clients[i].addr;
+				if (!memcmp(ad6, &si6->sin6_addr, sizeof *ad6)) break;
 			}
 		}
-	
-		if (i == clients_max) {
-			if (empty != -1) i = empty;
-			else i = oldest;
+
+		/* recycle slots of client that haven't been used for some time */
+		if (tracking_time > 0 && clients[i].last+tracking_time < now) {
+			/* too old, recycle */
+			clients[i].last = 0;
 		}
+
+		/* we already have an empty slot but keep looking for known client */
+		if (empty != -1) continue;
+
+		/* remember this empty slot in case we need it later */
+		if (clients[i].last == 0) {
+			empty = i;
+			continue;
+		}
+
+		/* and if we can't find any reusable slot we'll reuse the oldest one */
+		if (oldest == -1 || (clients[i].last < clients[oldest].last)) {
+			oldest = i;
+		}
+	}
+
+	/* reset statistics in case this is a "new" client */
+	if (i == clients_max) {
+		if (empty != -1) i = empty;
+		else i = oldest;
 		clients[i].connects = 0;
 		clients[i].csx = 0;
 		clients[i].crx = 0;
 	}
-	else 
-		i = clino;
 
-	clients[i].last = time(NULL);
-	clients[i].addr.family = AF_INET;
-	clients[i].addr.addr.a4 = cli;
-	clients[i].cno = ch;
+	clients[i].last = now;
+	clients[i].addr = *cli;
+	clients[i].server = -1;
 	clients[i].connects++;
 
-	if (debuglevel) {
-		debug("Client %s has index %d and server %d",
-			inet_ntoa(cli), i, ch);
-	}
-	servers[ch].c++;
+	DEBUG(2, "Client %s has index %d", pen_ntoa(cli), i);
 
 	return i;
 }
@@ -925,152 +1497,41 @@ static int getport(char *p, char *proto)
 	}
 }
 
-static void setipaddress(struct in_addr *a, char *p)
-{
-#if 1	/* obsolete */
-	struct hostent *h = gethostbyname(p);
-	if (h == NULL) {
-		if ((a->s_addr = inet_addr(p)) == -1) {
-			error("unknown or invalid address [%s]\n", p);
-		}
-	} else {
-		memcpy(a, h->h_addr, h->h_length);
-	}
-#else
-	struct addrinfo *ai;
-	struct addrinfo hints;
-	int n;
-	char *port = NULL;
-
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_flags = AI_ADDRCONFIG;
-	hints.ai_socktype = SOCK_STREAM;
-	n = getaddrinfo(p, port, &hints, &ai);
-	if (n != 0) {
-		debug("getaddrinfo: %s", gai_strerror(n));
-		return;
-	}
-	if (debuglevel) {
-		debug("family = %d", ai->ai_family);
-		debug("socktype = %d", ai->ai_socktype);
-		debug("protocol = %d", ai->ai_protocol);
-		debug("addrlen = %d", (int)ai->ai_addrlen);
-		debug("sockaddr = %p", ai->ai_addr);
-		debug("canonname = %s", ai->ai_canonname);
-	}
-/*
-       The addrinfo structure used by getaddrinfo() contains the following fields:
-
-           struct addrinfo {
-               int              ai_flags;
-               int              ai_family;
-               int              ai_socktype;
-               int              ai_protocol;
-               socklen_t        ai_addrlen;
-               struct sockaddr *ai_addr;
-               char            *ai_canonname;
-               struct addrinfo *ai_next;
-           };
-	The ai_addr is a struct sockaddr *
-	So what does that look like?
-
-struct sockaddr {
-    unsigned short    sa_family;    // address family, AF_xxx
-    char              sa_data[14];  // 14 bytes of protocol address
-};
-
-
-// IPv4 AF_INET sockets:
-
-struct sockaddr_in {
-    short            sin_family;   // e.g. AF_INET, AF_INET6
-    unsigned short   sin_port;     // e.g. htons(3490)
-    struct in_addr   sin_addr;     // see struct in_addr, below
-    char             sin_zero[8];  // zero this if you want to
-};
-
-struct in_addr {
-    unsigned long s_addr;          // load with inet_pton()
-};
-
-
-// IPv6 AF_INET6 sockets:
-
-struct sockaddr_in6 {
-    u_int16_t       sin6_family;   // address family, AF_INET6
-    u_int16_t       sin6_port;     // port number, Network Byte Order
-    u_int32_t       sin6_flowinfo; // IPv6 flow information
-    struct in6_addr sin6_addr;     // IPv6 address
-    u_int32_t       sin6_scope_id; // Scope ID
-};
-
-struct in6_addr {
-    unsigned char   s6_addr[16];   // load with inet_pton()
-};
-
-
-So why don't I use inet_pton?
-
-struct server currently has port and addr. In order to support ipv6
-this must be extended to address family. Then we have everything from
-sockaddr_in except the padding. So let's get rid of the struct in_addr
-field and the int port field and instead use a single struct sockaddr.
-Do this without adding any ipv6 code.
-
-	Copy address into *a
+/* Introduce the new format "[address]:port:maxc:hard:weight:prio"
+   in addition to the old one.
 */
-	freeaddrinfo(ai);
-#endif
-}
-
-#if 0
-static void setaddress(struct in_addr *a, int *port, char *s,
-		int dp, int *maxc, int *hard, int *weight, int *prio, char *proto)
-#else
 static void setaddress(int server, char *s, int dp, char *proto)
-#endif
 {
-	struct sockaddr_in ip4addr;
-//	struct hostent *h;
-
 	char address[1024], pno[100];
-	int n = sscanf(s, "%999[^:]:%99[^:]:%d:%d:%d:%d",
-		address, pno,
+	int n;
+	char *format;
+	int port;
+
+	if (s[0] == '[') {
+		format = "[%999[^]]]:%99[^:]:%d:%d:%d:%d";
+	} else {
+		format = "%999[^:]:%99[^:]:%d:%d:%d:%d";
+	}
+	n = sscanf(s, format, address, pno,
 		&servers[server].maxc, &servers[server].hard,
 		&servers[server].weight, &servers[server].prio);
 
-	if (n > 1) servers[server].port = getport(pno, proto);
-	else servers[server].port = dp;
+	if (n > 1) port = getport(pno, proto);
+	else port = dp;
 	if (n < 3) servers[server].maxc = 0;
 	if (n < 4) servers[server].hard = 0;
 	if (n < 5) servers[server].weight = 0;
 	if (n < 6) servers[server].prio = 0;
 
-	if (debuglevel)
-		debug("n = %d, address = %s, pno = %d, maxc1 = %d, hard = %d, weight = %d, prio = %d, proto = %s ",
-			n, address, servers[server].port, servers[server].maxc,
-			servers[server].hard, servers[server].weight,
-			servers[server].prio, proto);
+	DEBUG(2, "n = %d, address = %s, pno = %d, maxc1 = %d, hard = %d, weight = %d, prio = %d, proto = %s ", \
+		n, address, port, servers[server].maxc, \
+		servers[server].hard, servers[server].weight, \
+		servers[server].prio, proto);
 
-#if 0	/* obsolete */
-	if (!(h = gethostbyname(address))) {
-		if ((a4->s_addr = inet_addr(address)) == -1) {
-			error("unknown or invalid address [%s]\n", address);
-		}
-	} else {
-		memcpy(a, h->h_addr, h->h_length);
+	if (pen_aton(address, &servers[server].addr) == 0) {
+		error("unknown or invalid address [%s]", address);
 	}
-#else
-	if (inet_pton(AF_INET, address, &ip4addr.sin_addr)) != 1) {
-		error("unknown or invalid address [%s]\n", address);
-	} else {
-		servers[server].addr.addr.family = AF_INET;
-		servers[server].addr.a4.s_addr = I AM HERE
-	if (inet_pton(AF_INET, address, &(a4->sin_addr))) {
-		error("unknown or invalid address [%s]\n", address);
-	}
-#endif
+	pen_setport(&servers[server].addr, port);
 }
 
 /* Log format is:
@@ -1081,14 +1542,13 @@ static void netlog(int fd, int i, unsigned char *r, int n)
 {
 	int j, k;
 	char b[1024];
-	struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[conns[i].index].addr;
-	if (debuglevel) debug("netlog(%d, %d, %p, %d)", fd, i, r, n);
-	strcpy(b, "+ ");
+	DEBUG(2, "netlog(%d, %d, %p, %d)", fd, i, r, n);
+	strncpy(b, "+ ", sizeof b);
 	k = 2;
-	strcpy(b+k, pen_ntoa(&clients[conns[i].clt].addr));
+	strncpy(b+k, pen_ntoa(&clients[conns[i].client].addr), (sizeof b)-k);
 	k += strlen(b+k);
 	b[k++] = ' ';
-	strcpy(b+k, inet_ntoa(a4->sin_addr));
+	strncpy(b+k, pen_ntoa(&servers[conns[i].server].addr), (sizeof b)-k);
 	k += strlen(b+k);
 	b[k++] = ' ';
 
@@ -1112,11 +1572,10 @@ static void netlog(int fd, int i, unsigned char *r, int n)
 static void log_request(FILE *fp, int i, unsigned char *b, int n)
 {
 	int j;
-	struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[conns[i].index].addr;
 	if (n > KEEP_MAX) n = KEEP_MAX;
-	fprintf(fp, "%s ", pen_ntoa(&clients[conns[i].clt].addr));
-	fprintf(fp, "%ld ", (long)time(NULL));
-	fprintf(fp, "%s ", inet_ntoa(a4->sin_addr));
+	fprintf(fp, "%s ", pen_ntoa(&clients[conns[i].client].addr));
+	fprintf(fp, "%ld ", (long)now);
+	fprintf(fp, "%s ", pen_ntoa(&servers[conns[i].server].addr));
 	for (j = 0; j < n && b[j] != '\r' && b[j] != '\n'; j++) {
 		fprintf(fp, "%c", isascii(b[j])?b[j]:'.');
 	}
@@ -1131,19 +1590,19 @@ static int rewrite_request(int i, int n, char *b)
 
 	b[n] = '\0';
 
-	if (debuglevel > 1) debug("rewrite_request(%d, %d, %s)", i, n, b);
+	DEBUG(2, "rewrite_request(%d, %d, %s)", i, n, b);
 
 	if (pen_strncasecmp(b, "GET ", 4) &&
 	    pen_strncasecmp(b, "POST ", 5) &&
 	    pen_strncasecmp(b, "HEAD ", 5)) {
 		return n;	/* You can't touch this */
 	}
-	if (debuglevel) debug("Looking for CRLFCRLF");
+	DEBUG(2, "Looking for CRLFCRLF");
 	q = strstr(b, "\r\n\r\n");
 	/* Steve Hall <steveh@intrapower.com.au> tells me that
 	   apparently some clients send \n\n instead */
 	if (!q) {
-		if (debuglevel) debug("Looking for LFLF");
+		DEBUG(2, "Looking for LFLF");
 		q = strstr(b, "\n\n");
 	}
 	if (!q) return n;		/* not a header */
@@ -1151,14 +1610,14 @@ static int rewrite_request(int i, int n, char *b)
 	if (q >= b+n) return n;		/* outside of buffer */
 #endif
 	/* Look for existing X-Forwarded-For */
-	if (debuglevel) debug("Looking for X-Forwarded-For");
+	DEBUG(2, "Looking for X-Forwarded-For");
 
 	if (pen_strcasestr(b, "\nX-Forwarded-For:")) return n;
 
-	if (debuglevel) debug("Adding X-Forwarded-For");
+	DEBUG(2, "Adding X-Forwarded-For");
 	/* Didn't find one, add our own */
-	sprintf(p, "\r\nX-Forwarded-For: %s",
-		pen_ntoa(&clients[conns[i].clt].addr));
+	snprintf(p, sizeof p, "\r\nX-Forwarded-For: %s",
+		pen_ntoa(&clients[conns[i].client].addr));
 	pl=strlen(p);
 	if (n+pl > BUFFER_MAX) return n;
 
@@ -1169,54 +1628,150 @@ static int rewrite_request(int i, int n, char *b)
 	return n;
 }
 
+static void change_events(int i)
+{
+	int up_events = 0, down_events = 0;
+	int state = conns[i].state;
+	if (state & CS_IN_PROGRESS) {
+		DEBUG(2, "waiting for connect() to complete");
+		up_events |= EVENT_WRITE;
+	} else if (state & CS_CONNECTED) {
+		/* we are never interested in additional udp data from the client */
+		if (!udp) {
+			if (conns[i].upn == 0) {
+				if (!(state & CS_CLOSED_DOWN)) {
+					DEBUG(2, "interested in reading from downstream socket %d of connection %d", conns[i].downfd, i);
+					down_events |= EVENT_READ;
+				}
+			} else {
+				DEBUG(2, "interested in writing %d bytes to upstream socket %d of connection %d", conns[i].upn, conns[i].upfd, i);
+				up_events |= EVENT_WRITE;
+			}
+		}
+
+		/* tcp and udp processing upstream is handled the same here */
+		if (conns[i].downn == 0) {
+			if (!(state & CS_CLOSED_UP)) {
+				DEBUG(2, "interested in reading from upstream socket %d of connection %d", conns[i].upfd, i);
+				up_events |= EVENT_READ;
+			}
+		} else {
+			DEBUG(2, "interested in writing %d bytes to downstream socket %d of connection %d", conns[i].downn, conns[i].downfd, i);
+			down_events |= EVENT_WRITE;
+		}
+	}
+	/* We know that if down_events == up_events == 0, the connection
+	   will be closed. Not doing anything here shaves off two syscalls.
+	*/
+	if (down_events || up_events) {
+		if (conns[i].downfd != -1) event_arm(conns[i].downfd, down_events);
+		if (conns[i].upfd != -1) event_arm(conns[i].upfd, up_events);
+	}
+}
+
+static int closing_time(int conn)
+{
+	int closed = conns[conn].state & CS_CLOSED;
+
+	if (closed == CS_CLOSED) return 1;
+	if (conns[conn].downn + conns[conn].upn == 0) {
+		return closed & tcp_fastclose;
+	}
+	return 0;
+}
+
+static int my_recv(int fd, void *buf, size_t len, int flags)
+{
+	return recvfrom(fd, buf, len, flags, NULL, 0);
+}
+
+static int my_send(int fd, const void *buf, size_t len, int flags)
+{
+	if (fd == -1) return len;	/* idler */
+	return sendto(fd, buf, len, flags, NULL, 0);
+}
+
+static void add_dummy_reply(int conn)
+{
+	char msg[1024];
+	DEBUG(2, "add_dummy_reply(%d)", conn);
+	snprintf(msg, sizeof msg,
+		"HTTP/1.1 200 OK\r\n"
+		"Content-Length: %d\r\n"
+		"Content-Type: text/html\r\n\r\n%s",
+		(int)strlen(DUMMY_MSG), DUMMY_MSG);
+	conns[conn].downn = strlen(msg);
+	conns[conn].downbptr = conns[conn].downb = pen_malloc(conns[conn].downn);
+	memcpy(conns[conn].downb, msg, conns[conn].downn);
+	change_events(conn);
+}
+
 static int copy_up(int i)
 {
-	int rc;
+	int n, rc, err = 0;
 	int from = conns[i].downfd;
 	int to = conns[i].upfd;
-	int serverindex = conns[i].index;
+	int serverindex = conns[i].server;
 
 	unsigned char b[BUFFER_MAX];
 
-	size_t size = sizeof(struct sockaddr);
-
-#ifdef HAVE_SSL
+#ifdef HAVE_LIBSSL
 	SSL *ssl = conns[i].ssl;
 
 	if (ssl) {
 		rc = SSL_read(ssl, b, BUFFER_MAX);
-		if (debuglevel) debug("SSL_read returns %d\n", rc);
+		DEBUG(2, "SSL_read returns %d\n", rc);
 		if (rc < 0) {
-			int err = SSL_get_error(ssl, rc);
-			if (debuglevel) debug("SSL_read returns %d (SSL error %d)\n", rc, err);
+			err = SSL_get_error(ssl, rc);
+			DEBUG(2, "SSL_read returns %d (SSL error %d)\n", rc, err);
 			if (err == SSL_ERROR_WANT_READ ||
 			    err == SSL_ERROR_WANT_WRITE) {
 				return 0;
 			}
 		}
 	} else {
-		rc = read(from, b, BUFFER_MAX);
+		rc = my_recv(from, b, BUFFER_MAX, 0);
+		err = socket_errno;
 	}
 #else
-	if (!udp)
-		rc = read(from, b, BUFFER_MAX);
-	else {
-		rc = recvfrom (from, b, BUFFER_MAX, 0,
-                              (struct sockaddr *) conns[i].addr_listener, &size);
 
-	}
-#endif  /* HAVE_SSL */
+	rc = my_recv(from, b, BUFFER_MAX, 0);
+	err = socket_errno;
 
-	if (debuglevel > 1) debug("copy_up(%d) %d bytes", i, rc);
+#endif  /* HAVE_LIBSSL */
 
-	if (rc <= 0) {
+	DEBUG(2, "copy_up: recv(%d, %p, %d, 0) returns %d, errno = %d, socket_errno = %d", \
+		from, b, BUFFER_MAX, rc, errno, socket_errno);
+
+	if (rc == 0) {	/* orderly shutdown */
+		DEBUG(2, "orderly shutdown of socket downfd=%d", from);
+		conns[i].state |= CS_CLOSED_DOWN;
+
+		/* no need to bother with any of this
+		   if the connection will be closed anyway
+		*/
+		if (closing_time(i)) return -1;
+
+		change_events(i);	/* so we stop reading from downfd */
+		if (!(conns[i].state & CS_CLOSED_UP)) {
+			/* proceed telling upfd about the close */
+			n = shutdown(to, SHUT_WR);
+			if (n == -1) {
+				err = socket_errno;
+				DEBUG(2, "shutdown(upfd=%d, SHUT_WR) returns %d, socket_errno=%d", to, n, err);
+				if (err != ENOTCONN) conns[i].state |= CS_CLOSED;	/* because of the error */
+			}
+		}
+		return -1;	/* the connection was successfully half-closed, wait for upstream to act */
+	} else if (rc == -1) {
+		if (WOULD_BLOCK(err)) return 0;
+		conns[i].state |= CS_CLOSED;	/* because of the error */
 		return -1;
 	} else {
-		int n;
-
 		if (http) {
 			rc = rewrite_request(i, rc, (char *)b);
 		}
+
 		if (debuglevel > 2) dump(b, rc);
 
 		if (logfp) {
@@ -1227,210 +1782,218 @@ static int copy_up(int i)
 			netlog(logsock, i, b, rc);
 		}
 
-		if (delayed_forward) n = 0;
-		else {
-			if (!udp)
-				n = write(to, b, rc);	/* no ssl here */
-			else {
-				n = sendto(to, b, rc, 0,
-					(struct sockaddr *) conns[i].addr_backend, size);
-			}
-		}
+		n = my_send(to, b, rc, 0);	/* no ssl here */
+		SAVE_ERRNO;
 
-		if (n < 0) {
-			if (!nblock || errno != EAGAIN) return -1;
+		DEBUG(2, "copy_up: send(%d, %p, %d, 0) returns %d, socket_errno = %d",
+			to, b, rc, n, USE_ERRNO);
+		if (n == -1) {
+			if (!WOULD_BLOCK(USE_ERRNO)) {
+				conns[i].state |= CS_CLOSED;
+				return -1;
+			}
 			n = 0;
 		}
 		if (n != rc) {
-			if (debuglevel > 1) {
-				debug("copy_up saving %d bytes in up buffer",
-					rc-n);
-			}
-			conns[i].upn = rc-n;
+			DEBUG(2, "copy_up saving %d bytes in up buffer", rc-n);
+			conns[i].upn = rc-n;	/* remaining to be copied */
 			conns[i].upbptr = conns[i].upb = pen_malloc(rc-n);
 			memcpy(conns[i].upb, b+n, rc-n);
+			change_events(i);
 		}
-		servers[serverindex].sx += rc;
-		clients[conns[i].clt].crx += rc;
+#if 0
+These could be simplified, no? Just store them in conn and update
+servers and clients from close_conn.
+#endif
+		servers[serverindex].sx += rc;	/* That's not right? Should be n */
+		clients[conns[i].client].crx += rc;
+		conns[i].crx += rc;	/* rewritten bytes read from client */
+		conns[i].ssx += n;	/* actual bytes written to server */
+
+		if (dummy) add_dummy_reply(i);
 	}
 	return 0;
 }
 
+/* this function may have to deal with udp */
 static int copy_down(int i)
 {
-	int rc;
+	int n, rc, err = 0;
 	int from = conns[i].upfd;
 	int to = conns[i].downfd;
-	int serverindex = conns[i].index;
-#ifdef HAVE_SSL
+	int serverindex = conns[i].server;
+#ifdef HAVE_LIBSSL
 	SSL *ssl = conns[i].ssl;
 #endif
 
 	unsigned char b[BUFFER_MAX];
 
-	socklen_t size = sizeof(struct sockaddr);
+	/* we called connect from add_client, so this works for udp and tcp */
+	rc = my_recv(from, b, BUFFER_MAX, 0);	/* no ssl here */
 
-	if (!udp)
-		rc = read(from, b, BUFFER_MAX);	/* no ssl here */
-	else
-		rc = recvfrom (from, b, BUFFER_MAX, 0,
-                              (struct sockaddr *) conns[i].addr_backend, &size);
-
-	if (debuglevel > 1) debug("copy_down(%d) %d bytes", i, rc);
+	DEBUG(2, "copy_down: recv(%d, %p, %d, %d) returns %d", from, b, BUFFER_MAX, 0, rc);
 	if (debuglevel > 2) dump(b, rc);
 
-	if (rc <= 0) {
+	if (rc == 0) {
+		DEBUG(2, "orderly shutdown of socket %d", from);
+		conns[i].state |= CS_CLOSED_UP;
+
+		/* no need to bother with any of this
+		   if the connection will be closed anyway
+		*/
+		if (closing_time(i)) return -1;
+
+		change_events(i);	/* so we stop reading from upfd */
+		if (!(conns[i].state & CS_CLOSED_DOWN)) {
+			n = shutdown(to, SHUT_WR);
+			if (n == -1) {
+				err = socket_errno;
+				DEBUG(2, "shutdown(downfd=%d, SHUT_WR) returns %d, socket_errno=%d", to, n, err);
+				if (err != ENOTCONN) conns[i].state |= CS_CLOSED;	/* because of the error */
+			}
+		}
+		return -1;
+	} else if (rc == -1) {
+		DEBUG(2, "socket_errno = %d", socket_errno);
+		conns[i].state |= CS_CLOSED;	/* because of the error */
 		return -1;
 	} else {
 		int n;
 
-		if (delayed_forward) {
-			n = 0;
-		} else {
-#ifdef HAVE_SSL
-			if (ssl) {
-				/* can't write more than 32000 bytes at a time */
-				int ssl_rc;
-				if (rc > 32000) ssl_rc = 32000;
-				else ssl_rc = rc;
-				n = SSL_write(ssl, b, ssl_rc);
-				if (debuglevel) debug("SSL_write returns %d\n", n);
-				if (n < 0) {
-					int err = SSL_get_error(ssl, n);
-					if (debuglevel) debug("SSL error %d\n", err);
-					if (err == SSL_ERROR_WANT_READ ||
-					    err == SSL_ERROR_WANT_WRITE) {
-						return 0;
-					}
-				}
-			} else {
-				n = write(to, b, rc);
-			}
-#else
-			if (!udp)
-				n = write(to, b, rc);
-			else {
-				n = sendto(to, b, rc, 0,
-					(struct sockaddr *) conns[i].addr_listener, size);
-			}
-#endif
+		if (udp) {
+			struct sockaddr_storage *ss = &clients[conns[i].client].addr;
+			socklen_t sss = pen_ss_size(ss);
+			DEBUG(2, "copy_down sending %d bytes to socket %d", rc, to);
+			n = sendto(to, b, rc, 0, (struct sockaddr *)ss, sss);
+			close_conn(i);
+			return 0;
 		}
 
-		if (n < 0) {
-			if (!nblock || errno != EAGAIN) return -1;
+#ifdef HAVE_LIBSSL
+		if (ssl) {
+			/* can't write more than 32000 bytes at a time */
+			int ssl_rc;
+			if (rc > 32000) ssl_rc = 32000;
+			else ssl_rc = rc;
+			n = SSL_write(ssl, b, ssl_rc);
+			DEBUG(2, "SSL_write returns %d", n);
+			if (n < 0) {
+				err = SSL_get_error(ssl, n);
+				if (debuglevel) debug("SSL error %d\n", err);
+				if (err == SSL_ERROR_WANT_READ ||
+				    err == SSL_ERROR_WANT_WRITE) {
+					return 0;
+				}
+			}
+		} else {
+			n = my_send(to, b, rc, 0);
+			err = socket_errno;
+			DEBUG(2, "copy_down: send(%d, %p, %d, %d) returns %d", to, b, rc, 0, n);
+		}
+#else
+		n = my_send(to, b, rc, 0);
+		err = socket_errno;
+		DEBUG(2, "copy_down: send(%d, %p, %d, %d) returns %d", to, b, rc, 0, n);
+#endif
+
+		if (n == -1) {
+			DEBUG(2, "errno = %d, socket_errno = %d", errno, socket_errno);
+			if (!WOULD_BLOCK(err)) {
+				conns[i].state |= CS_CLOSED;
+				return -1;
+			}
 			n = 0;
 		}
 		if (n != rc) {
-			if (debuglevel > 1) {
-				debug("copy_down saving %d bytes in down buffer",
-					rc-n);
-			}
+			DEBUG(2, "copy_down saving %d bytes in down buffer", rc-n);
 			conns[i].downn = rc-n;
 			conns[i].downbptr = conns[i].downb = pen_malloc(rc-n);
 			memcpy(conns[i].downb, b+n, rc-n);
+			change_events(i);
 		}
 		servers[serverindex].rx += rc;
-		clients[conns[i].clt].csx += n;
+		clients[conns[i].client].csx += n;
+		conns[i].srx += rc;
+		conns[i].csx += n;
 	}
 	return 0;
 }
 
 static void alarm_handler(int dummy)
 {
-	if (debuglevel) debug("alarm_handler(%d)", dummy);
-	if (udp) no_response();
+	DEBUG(2, "alarm_handler(%d)", dummy);
 }
 
-static void no_response(){		/* UDP packet is not responding */
-	int iserv = conns[0].index;
-	if (udpused == 2){
-		if (servers[iserv].status == 0){
-			if (debuglevel > 1) debug("No response UDP Server %d failed, \
-						retry in %d sec", iserv, blacklist_time);
-			servers[iserv].status = (int)time(NULL);
-		}
-	}
-	udpused=3;
-}
-
-#ifdef HAVE_SSL
-static void store_conn(int downfd, SSL *ssl, int upfd, int clt, int index,
-			struct sockaddr_in *serv_addr, struct sockaddr_in *cli_addr, struct sockaddr_in *addr_client)
+#ifdef HAVE_LIBSSL
+static int store_conn(int downfd, SSL *ssl, int client)
 #else
-static void store_conn(int downfd, int upfd, int clt, int index,
-			struct sockaddr_in *serv_addr, struct sockaddr_in *cli_addr, struct sockaddr_in *addr_client)
+static int store_conn(int downfd, int client)
 #endif
 {
-	int i, fl;
+	int i;
 
-	if (nblock) {
-		if ((fl = fcntl(downfd, F_GETFL, 0)) == -1)
-			error("Can't fcntl, errno = %d", errno);
-		if (fcntl(downfd, F_SETFL, fl | O_NONBLOCK) == -1)
-			error("Can't fcntl, errno = %d", errno);
-		if ((fl = fcntl(upfd, F_GETFL, 0)) == -1)
-			error("Can't fcntl, errno = %d", errno);
-		if (fcntl(upfd, F_SETFL, fl | O_NONBLOCK) == -1)
-			error("Can't fcntl, errno = %d", errno);
-	}
 	i = connections_last;
 	do {
-		if (conns[i].upfd == -1) break;
+		if (conns[i].state == CS_UNUSED) break;
 		i++;
 		if (i >= connections_max) i = 0;
 	} while (i != connections_last);
-	/* The next test is not necessary, because we don't call
-	   store_conn unless there are empty connection slots.
-	   Keep the test anyway for now. */
-	if (conns[i].upfd == -1) {
+
+	if (conns[i].state == CS_UNUSED) {
 		connections_last = i;
 		connections_used++;
-		conns[i].upfd = upfd;
+		DEBUG(2, "incrementing connections_used to %d for connection %d",
+			connections_used, i);
+		conns[i].upfd = -1;
 		conns[i].downfd = downfd;
-#ifdef HAVE_SSL
+		if (downfd != -1) fd2conn_set(downfd, i);
+#ifdef HAVE_LIBSSL
 		conns[i].ssl = ssl;
 #endif
-		conns[i].clt = clt;
-		conns[i].index = index;
-		if (udp){
-			conns[i].addr_backend = serv_addr;
-			conns[i].addr_listener = cli_addr;
-			conns[i].addr_client = addr_client;
-		}
-#ifdef HAVE_KQUEUE
-		/* kqueue can store a pointer to arbitrary data with each
-		 * event, but it must be a pointer. We store a pointer to
-		 * conns[i]. copy_up/down then require i again, which we
-		 * can't get without storing i within the struct itself. */
-		conns[i].i = i;
-#endif
-		current = index;
+		conns[i].client = client;
+		conns[i].initial = -1;
+		conns[i].server = -1;
+		conns[i].srx = conns[i].ssx = 0;
+		conns[i].crx = conns[i].csx = 0;
 	} else {
+		i = -1;
 		if (debuglevel)
 			debug("Connection table full (%d slots), can't store connection.\n"
 			      "Try restarting with -x %d",
 			      connections_max, 2*connections_max);
-		close(downfd);
-		close(upfd);
+		if (downfd != -1) close(downfd);
 	}
-	if (debuglevel) debug("store_conn: connections_used = %d",
-				connections_used);
+	DEBUG(2, "store_conn: conn = %d, downfd = %d, connections_used = %d", \
+		i, downfd, connections_used);
+	return i;
+}
+
+static int idler(int conn)
+{
+	return (conns[conn].state & CS_CONNECTED) && (conns[conn].client == -1);
 }
 
 static void close_conn(int i)
 {
-	int index = conns[i].index;
-//	if (connection_ctrl == 0) servers[index].c -= 1;
-	servers[index].c -= 1;
-	if (servers[index].c < 0) servers[index].c = 0;
+	int index = conns[i].server;
 
-	if (conns[i].upfd > 0) {
+	/* unfinished connections have server == -1 */
+	if (index != -1) {
+		servers[index].c -= 1;
+		if (servers[index].c < 0) servers[index].c = 0;
+	}
+
+	if (conns[i].upfd != -1 && conns[i].upfd != listenfd) {
+		event_delete(conns[i].upfd);
 		close(conns[i].upfd);
+		fd2conn_set(conns[i].upfd, -1);
 	}
-	if (conns[i].downfd > 0) {
-		if (!udp)
-			close(conns[i].downfd);
+	if (conns[i].downfd != -1 && conns[i].downfd != listenfd) {
+		event_delete(conns[i].downfd);
+		close(conns[i].downfd);
+		fd2conn_set(conns[i].downfd, -1);
 	}
+	if (idler(i)) idlers--;
 	conns[i].upfd = conns[i].downfd = -1;
 	if (conns[i].downn) {
 		free(conns[i].downb);
@@ -1440,17 +2003,31 @@ static void close_conn(int i)
 		free(conns[i].upb);
 		conns[i].upn=0;
 	}
-#ifdef HAVE_SSL
+#ifdef HAVE_LIBSSL
 	if (conns[i].ssl) {
 		SSL_free(conns[i].ssl);
 		conns[i].ssl = 0;
 	}
 #endif
-//	connection_ctrl = 0;
 	connections_used--;
-	if (connections_used < 0) connections_used = 0;
-	if (debuglevel) debug("close_conn: connections_used = %d",
-				connections_used);
+	DEBUG(2, "decrementing connections_used to %d for connection %d",
+		connections_used, i);
+	if (connections_used < 0) {
+		debug("connections_used = %d. Resetting.", connections_used);
+		connections_used = 0;
+	}
+	if (conns[i].state == CS_IN_PROGRESS) {
+		pending_list = dlist_remove(conns[i].pend);
+	}
+	conns[i].state = CS_UNUSED;
+	DEBUG(2, "close_conn: Closing connection %d to server %d; connections_used = %d\n" \
+		"\tRead %ld from client, wrote %ld to server\n" \
+		"\tRead %ld from server, wrote %ld to client", \
+		i, index, connections_used, \
+		conns[i].crx, conns[i].ssx, \
+		conns[i].srx, conns[i].csx);
+	DEBUG(3, "Aggregate for server %d: sx=%d, rx=%d",
+		conns[i].server, servers[conns[i].server].sx, servers[conns[i].server].rx);
 }
 
 
@@ -1470,7 +2047,9 @@ static void usage(void)
 	       "  -T sec    tracking time in seconds (0 = forever) [%d]\n"
 	       "  -H	add X-Forwarded-For header in http requests\n"
 	       "  -U	use udp protocol support\n"
+	       "  -O    use epoll to manage events (Linux)\n"
 	       "  -P	use poll() rather than select()\n"
+	       "  -Q    use kqueue to manage events (BSD)\n"
 	       "  -W    use weight for server selection\n"
 	       "  -X	enable 'exit' command for control port\n"
 	       "  -a	debugging dumps in ascii format\n"
@@ -1484,7 +2063,6 @@ static void usage(void)
 	       "  -j dir    run in chroot\n"
 	       "  -F file   name of configuration file\n"
 	       "  -l file   logging on\n"
-	       "  -n	do not make sockets nonblocking\n"
 	       "  -r	bypass client tracking in server selection\n"
 	       "  -s	stubborn selection, i.e. don't fail over\n"
 	       "  -t sec    connect timeout in seconds [%d]\n"
@@ -1509,6 +2087,7 @@ static void usage(void)
 	exit(0);
 }
 
+#ifndef WINDOWS
 static void background(void)
 {
 #ifdef HAVE_DAEMON
@@ -1530,6 +2109,7 @@ static void background(void)
 	signal(SIGCHLD, SIG_IGN);
 #endif
 }
+#endif
 
 static void init(int argc, char **argv)
 {
@@ -1566,7 +2146,7 @@ static void init(int argc, char **argv)
 	while (nservers < servers_max) {
 		servers[server].status = 0;
 		servers[server].c = 0;	/* connections... */
-		setaddress(server, "0.0,0,0", 0, proto);
+		setaddress(server, "0.0.0.0", 0, proto);
 		servers[server].sx = 0;
 		servers[server].rx = 0;
 
@@ -1596,7 +2176,7 @@ static void init(int argc, char **argv)
 	for (i = 0; i < clients_max; i++) {
 		clients[i].last = 0;
 		memset(&clients[i].addr, 0, sizeof(clients[i].addr));
-		clients[i].cno = 0;
+		clients[i].server = 0;
 		clients[i].connects = 0;
 		clients[i].csx = 0;
 		clients[i].crx = 0;
@@ -1609,76 +2189,112 @@ static void init(int argc, char **argv)
 	}
 
 	if (debuglevel) {
+		debug("%s starting", PACKAGE_STRING);
 		debug("servers:");
 		for (i = 0; i < nservers; i++) {
-			struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[i].addr;
 			debug("%2d %s:%d:%d:%d:%d:%d", i,
-				inet_ntoa(a4->sin_addr), ntohs(a4->sin_port),
+				pen_ntoa(&servers[i].addr), pen_getport(&servers[i].addr),
 				servers[i].maxc, servers[i].hard,
 				servers[i].weight, servers[i].prio);
 		}
 	}
 }
 
-/* return upstream file descriptor */
-/* sticky = 1 if this client has used the server before */
-static int try_server(int index, int sticky, unsigned int cli_addr,
-				struct sockaddr_in *addr, struct sockaddr_in *addr_client)
+static void blacklist_server(int server)
+{
+	servers[server].status = now;
+}
+
+/* Initiate connection to server 'index' and populate upfd field in connection */
+/* return 1 for (potential) success, 0 for failure */
+static int try_server(int index, int conn)
 {
 	int upfd;
-	int n = 0;
-	int now = (int)time(NULL);
+	int client = conns[conn].client;
+	int n = 0, err;
 	int optval = 1;
-	struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[index].addr;
+	struct sockaddr_storage *addr = &servers[index].addr;
+	/* The idea is that a client should be able to connect again to the same server
+	   even if the server is close to its configured connection limit */
+	int sticky = ((client != -1) && (index == clients[client].server));
 
-	if (debuglevel) debug("Trying server %d at time %d", index, now);
-	if (a4->sin_port == 0) {
-		if (debuglevel) debug("No port for you!");
-		return -1;
+	DEBUG(2, "Trying server %d for connection %d at time %d", index, conn, now);
+	if (index < 0) return 0;	/* out of bounds */
+	if (pen_getport(addr) == 0) {
+		DEBUG(1, "No port for you!");
+		return 0;
 	}
 	if (now-servers[index].status < blacklist_time) {
-		if (debuglevel) debug("Server %d is blacklisted", index);
-		return -1;
+		DEBUG(1, "Server %d is blacklisted", index);
+		return 0;
 	}
 	if (servers[index].maxc != 0 &&
 	    (servers[index].c >= servers[index].maxc) &&
 	    (sticky == 0 || servers[index].c >= servers[index].hard)) {
-		if (debuglevel)
-			debug("Server %d is overloaded: sticky=%d, maxc=%d, hard=%d",
-				index, sticky,
-				servers[index].maxc, servers[index].hard);
-		return -1;
+		DEBUG(1, "Server %d is overloaded: sticky=%d, maxc=%d, hard=%d", \
+				index, sticky, servers[index].maxc, servers[index].hard);
+		return 0;
 	}
-	if (!match_acl_ipv4(servers[index].acl, cli_addr)) {
-		if (debuglevel) debug("try_server: denied by acl");
-		return -1;
+	if ((client != -1) && !match_acl(servers[index].acl, &(clients[client].addr))) {
+		DEBUG(1, "try_server: denied by acl");
+		return 0;
+	}
+	upfd = socket_nb(addr->ss_family, protoid, 0);
+
+	if (keepalive) {
+		setsockopt(upfd, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof optval);
 	}
 
-	upfd = socket(AF_INET, protoid, 0);
-	if (upfd < 0) error("Error opening socket: %d", errno);
-	memset(addr, 0, sizeof *addr);
-	addr->sin_family = AF_INET;
-	addr->sin_addr.s_addr = a4->sin_addr.s_addr;
-	addr->sin_port = a4->sin_port;	// htons(servers[index].port);
-	setsockopt(upfd, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof optval);
-
-	sigaction(SIGALRM, &alrmaction, NULL);
-	alarm(timeout);
-	n = connect(upfd, (struct sockaddr *) addr, sizeof *addr);
-	alarm(0);	/* cancel scheduled timeout, if there is one */
-	if (n == -1) {
-		if (servers[index].status == 0)
-			debug("Server %d failed, retry in %d sec: %s", index, blacklist_time, strerror(errno));
-		servers[index].status = (int)time(NULL);
+	if (debuglevel > 1) {
+		debug("Connecting to %s", pen_ntoa(addr));
+		pen_dumpaddr(addr);
+	}
+	conns[conn].t = now;
+	n = connect(upfd, (struct sockaddr *)addr, pen_ss_size(addr));
+	err = socket_errno;
+	DEBUG(2, "connect (upfd = %d) returns %d, errno = %d, socket_errno = %d",
+		upfd, n, errno, err);
+	/* A new complication is that we don't know yet if the connect will succeed. */
+	if (n == 0) {		/* connection completed */
+		conns[conn].state = CS_CONNECTED;
+		if (conns[conn].downfd == -1) {
+			/* idler */
+			conns[conn].state |= CS_CLOSED_DOWN;
+		}
+		event_add(upfd, EVENT_READ);
+		if (!udp) event_add(conns[conn].downfd, EVENT_READ);
+		servers[index].c++;
+		if (servers[index].status) {
+			servers[index].status = 0;
+			DEBUG(1, "Server %d ok", index);
+		}
+		DEBUG(2, "Successful connect to server %d\n" \
+			"conns[%d].client = %d\n" \
+			"conns[%d].server = %d", \
+			index, conn, conns[conn].client, conn, conns[conn].server);
+	} else if (err == CONNECT_IN_PROGRESS) {	/* may potentially succeed */
+		conns[conn].state = CS_IN_PROGRESS;
+		pending_list = dlist_insert(pending_list, conn);
+		conns[conn].pend = pending_list;
+		event_add(upfd, EVENT_WRITE);
+		DEBUG(2, "Pending connect to server %d\n" \
+			"conns[%d].client = %d\n" \
+			"conns[%d].server = %d", \
+			index, conn, conns[conn].client, conn, conns[conn].server);
+	} else {		/* failed definitely */
+		if (servers[index].status == 0) {
+			debug("Server %d failed, retry in %d sec: %d",
+				index, blacklist_time, socket_errno);
+		}
+		blacklist_server(index);
 		close(upfd);
-		return -1;
+		return 0;
 	}
-	if (servers[index].status) {
-		servers[index].status=0;
-		if (debuglevel) debug("Server %d ok", index);
-	}
-	if (debuglevel) debug("Successful connect to server %d", index);
-	return upfd;
+	conns[conn].server = index;
+	current = index;
+	conns[conn].upfd = upfd;
+	fd2conn_set(upfd, conn);
+	return 1;
 }
 
 static void open_log(char *logfile)
@@ -1695,10 +2311,9 @@ static void open_log(char *logfile)
 		char *p = strchr(logfile, ':');
 		if (p && logfile[0] != '/') {	/* log to net */
 			struct hostent *hp;
-			if (debuglevel) debug("net log to %s", logfile);
+			DEBUG(2, "net log to %s", logfile);
 			*p++ = '\0';
-			logsock = socket(PF_INET, SOCK_DGRAM, 0);
-			if (logsock < 0) error("Can't create log socket");
+			logsock = socket_nb(PF_INET, SOCK_DGRAM, 0);
 			logserver.sin_family = AF_INET;
 			hp = gethostbyname(logfile);
 			if (hp == NULL) error("Bogus host %s", logfile);
@@ -1706,11 +2321,89 @@ static void open_log(char *logfile)
 				hp->h_addr, hp->h_length);
 			logserver.sin_port = htons(atoi(p));
 		} else {	/* log to file */
-			if (debuglevel) debug("file log to %s", logfile);
+			DEBUG(2, "file log to %s", logfile);
 			logfp = fopen(logfile, "a");
 			if (!logfp) error("Can't open logfile %s", logfile);
 		}
 	}
+}
+
+#ifndef WINDOWS
+static int open_unix_listener(char *a)
+{
+	int n, listenfd;
+	struct sockaddr_un serv_addr;
+
+	remove(a);
+	memset(&serv_addr, 0, sizeof serv_addr);
+	serv_addr.sun_family = AF_UNIX;
+	snprintf(serv_addr.sun_path, sizeof serv_addr.sun_path, "%s", a);
+	listenfd = socket_nb(AF_UNIX, SOCK_STREAM, 0);
+	if (bind(listenfd, (struct sockaddr *)&serv_addr, sizeof serv_addr) != 0) {
+		error("can't bind local address");
+	}
+	n = listen(listenfd, listen_queue);
+	if (n == -1) {
+		DEBUG(2, "listen(%d, %d) returns -1, errno = %d, socket_errno = %d",
+			listenfd, listen_queue, errno, socket_errno);
+	}
+	return listenfd;
+}
+#endif
+
+static int open_listener(char *a)
+{
+	int listenfd;
+	struct sockaddr_storage ss;
+
+	char b[1024], *p;
+	int one = 1;
+	int optval = 1;
+	int port;
+
+#ifndef WINDOWS
+	/* Handle Unix domain sockets separately */
+	if (strchr(a, '/')) return open_unix_listener(a);
+#endif
+
+	memset(&ss, 0, sizeof ss);
+	p = strrchr(a, ':');	/* look for : separating address from port */
+	if (p) {
+		/* found one, extract parts */
+		if ((p-a) >= sizeof b) {
+			error("Address %s too long", a);
+			return -1;
+		}
+		strncpy(b, a, p-a);
+		b[p-a] = '\0';
+		port = getport(p+1, proto);
+	} else {
+		strncpy(b, "0.0.0.0", sizeof b);
+		port = getport(a, proto);
+	}
+	if (port < 1 || port > 65535) {
+		debug("Port %d out of range", port);
+		return -1;
+	}
+
+	if (!pen_aton(b, &ss)) {
+		debug("Can't convert address '%s'", b);
+		return -1;
+	}
+	pen_setport(&ss, port);
+
+	listenfd = socket_nb(ss.ss_family, protoid, 0);
+	DEBUG(2, "local address=[%s:%d]", b, port);
+
+	setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (char *)&one, sizeof one);
+	setsockopt(listenfd, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof optval);
+
+	if (bind(listenfd, (struct sockaddr *)&ss, pen_ss_size(&ss)) < 0) {
+		error("can't bind local address");
+	}
+
+	listen(listenfd, listen_queue);
+	return listenfd;
 }
 
 static void read_cfg(char *);
@@ -1719,12 +2412,14 @@ static void write_cfg(char *p)
 {
 	int i, j;
 	struct in_addr ip;
-	time_t now;
+	char ip_str[INET6_ADDRSTRLEN];
 	struct tm *nowtm;
 	char nowstr[80];
 	FILE *fp = fopen(p, "w");
-	if (!fp) debug("Can't open file '%s'", p);
-	now = time(NULL);
+	if (!fp) {
+		debug("Can't open file '%s'", p);
+		return;
+	}
 	nowtm = localtime(&now);
 	strftime(nowstr, sizeof(nowstr), "%Y-%m-%d %H:%M:%S", nowtm);
 	fprintf(fp, "# Generated by pen %s\n", nowstr);
@@ -1747,20 +2442,26 @@ static void write_cfg(char *p)
 	for (i = 0; i < ACLS_MAX; i++) {
 		fprintf(fp, "no acl %d\n", i);
 		for (j = 0; j < nacls[i]; j++) {
+			fprintf(fp, "acl %d %s ", i,
+				acls[i][j].permit?"permit":"deny");
 			switch (acls[i][j].class) {
 			case ACE_IPV4:
 				memcpy(&ip, &acls[i][j].ace.ipv4.ip, 4);
-				fprintf(fp, "acl %d %s %s ", i,
-					acls[i][j].permit?"permit":"deny",
-					inet_ntoa(ip));
+				fprintf(fp, "%s ", inet_ntoa(ip));
 				memcpy(&ip, &acls[i][j].ace.ipv4.mask, 4);
 				fprintf(fp, "%s\n", inet_ntoa(ip));
 				break;
 			case ACE_IPV6:
-				debug("ACE_IPV6: Not implemented");
+				fprintf(fp, "%s/%d\n",
+					inet_ntop(AF_INET6,
+						&acls[i][j].ace.ipv6.ip,
+						ip_str, sizeof ip_str),
+					acls[i][j].ace.ipv6.len);
 				break;
 			case ACE_GEO:
-				debug("ACE_GEO: Not implemented");
+				fprintf(fp, "country %c%c\n",
+					acls[i][j].ace.geo.country[0],
+					acls[i][j].ace.geo.country[1]);
 				break;
 			default:
 				debug("Unknown ACE class %d (this is probably a bug)",
@@ -1771,13 +2472,9 @@ static void write_cfg(char *p)
 	if (asciidump) fprintf(fp, "ascii\n");
 	else fprintf(fp, "no ascii\n");
 	fprintf(fp, "blacklist %d\n", blacklist_time);
-	if (nblock) fprintf(fp, "no block\n");
-	else fprintf(fp, "block\n");
 	fprintf(fp, "client_acl %d\n", client_acl);
 	fprintf(fp, "control_acl %d\n", control_acl);
 	fprintf(fp, "debug %d\n", debuglevel);
-	if (delayed_forward) fprintf(fp, "delayed_forward\n");
-	else fprintf(fp, "no delayed_forward\n");
 	if (hash) fprintf(fp, "hash\n");
 	else fprintf(fp, "no hash\n");
 	if (http) fprintf(fp, "http\n");
@@ -1787,11 +2484,10 @@ static void write_cfg(char *p)
 	if (roundrobin) fprintf(fp, "roundrobin\n");
 	else fprintf(fp, "no roundrobin\n");
 	for (i = 0; i < nservers; i++) {
-		struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[i].addr;
 		fprintf(fp,
 			"server %d acl %d address %s port %d max %d hard %d",
 			i, servers[i].acl,
-			inet_ntoa(a4->sin_addr), ntohs(a4->sin_port),
+			pen_ntoa(&servers[i].addr), pen_getport(&servers[i].addr),
 			servers[i].maxc, servers[i].hard);
 		if (weight) fprintf(fp, " weight %d", servers[i].weight);
 		if (prio) fprintf(fp, " prio %d", servers[i].prio);
@@ -1799,6 +2495,20 @@ static void write_cfg(char *p)
 	}
 	if (stubborn) fprintf(fp, "stubborn\n");
 	else fprintf(fp, "no stubborn\n");
+	if (tcp_fastclose == CS_CLOSED) {
+		fprintf(fp, "tcp_fastclose both\n");
+	} else if (tcp_fastclose == CS_CLOSED_UP) {
+		fprintf(fp, "tcp_fastclose up\n");
+	} else if (tcp_fastclose == CS_CLOSED_DOWN) {
+		fprintf(fp, "tcp_fastclose down\n");
+	} else {
+		fprintf(fp, "tcp_fastclose off\n");
+	}
+	if (tcp_nodelay) {
+		fprintf(fp, "tcp_nodelay\n");
+	} else {
+		fprintf(fp, "no tcp_nodelay\n");
+	}
 	fprintf(fp, "timeout %d\n", timeout);
 	fprintf(fp, "tracking %d\n", tracking_time);
 	if (webfile) fprintf(fp, "web_stats %s\n", webfile);
@@ -1810,22 +2520,22 @@ static void write_cfg(char *p)
 	fclose(fp);
 }
 
-static void do_cmd(char *b, void (*output)(char *, void *), void *op)
+static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 {
 	char *p, *q;
-	int n, fl;
+	int n;
 	FILE *fp;
 
-	if (debuglevel) {
-		debug("do_cmd(%s, %p, %p)", b, output, op);
-	}
+	DEBUG(2, "do_cmd(%s, %p, %p)", b, output, op);
 	p = strchr(b, '\r');
 	if (p) *p = '\0';
 	p = strchr(b, '\n');
 	if (p) *p = '\0';
 	p = strtok(b, " ");
 	if (p == NULL) return;
-	if (!strcmp(p, "acl")) {
+	if (!strcmp(p, "abort_on_error")) {
+		abort_on_error = 1;
+	} else if (!strcmp(p, "acl")) {
 		char *no, *pd, *ip, *ma;
 		/* acl N permit|deny ipaddr [mask] */
 		if ((no = strtok(NULL, " ")) &&
@@ -1879,56 +2589,70 @@ static void do_cmd(char *b, void (*output)(char *, void *), void *op)
 	} else if (!strcmp(p, "blacklist")) {
 		p = strtok(NULL, " ");
 		if (p) blacklist_time = atoi(p);
-		sprintf(b, "%d\n", blacklist_time);
-		output(b, op);
-	} else if (!strcmp(p, "block")) {
-		nblock = 0;
-		fl = fcntl(listenfd, F_GETFL, 0);
-		fcntl(listenfd, F_SETFL, fl & ~O_NONBLOCK);
-		fl = fcntl(ctrlfd, F_GETFL, 0);
-		fcntl(ctrlfd, F_SETFL, fl & ~O_NONBLOCK);
+		output(op, "%d\n", blacklist_time);
 	} else if (!strcmp(p, "client_acl")) {
 		p = strtok(NULL, " ");
 		if (p) client_acl = atoi(p);
 		if (client_acl < 0 || client_acl >= ACLS_MAX)
 			client_acl = 0;
-		sprintf(b, "%d\n", client_acl);
-		output(b, op);
+		output(op, "%d\n", client_acl);
 	} else if (!strcmp(p, "clients_max")) {
-		sprintf(b, "%d\n", clients_max);
-		output(b, op);
+		output(op, "%d\n", clients_max);
+	} else if (!strcmp(p, "close")) {
+		p = strtok(NULL, " ");
+		int conn = p ? atoi(p) : 0;
+		if (conn < 0 || conn >= connections_max) {
+			output(op, "Connection %d out of range\n", conn);
+		} else {
+			output(op, "Forcibly closing connection %d\n", conn);
+			close_conn(conn);
+		}
+	} else if (!strcmp(p, "connection")) {
+		p = strtok(NULL, " ");
+		int conn = p ? atoi(p) : 0;
+		if (conn < 0 || conn >= connections_max) {
+			output(op, "Connection %d out of range\n", conn);
+		} else {
+			output(op, "Connection %d:\n", conn);
+			output(op, "state = %d\n", conns[conn].state);
+			output(op, "downfd = %d, upfd = %d\n",
+				conns[conn].downfd, conns[conn].upfd);
+			output(op, "client = %d, server = %d\n",
+				conns[conn].client, conns[conn].server);
+			output(op, "pend = %d\n", conns[conn].pend);
+		}
 	} else if (!strcmp(p, "conn_max")) {
-		sprintf(b, "%d\n", connections_max);
-		output(b, op);
+		output(op, "%d\n", connections_max);
 	} else if (!strcmp(p, "control")) {
-		sprintf(b, "%s\n", ctrlport);
-		output(b, op);
+		output(op, "%s\n", ctrlport);
 	} else if (!strcmp(p, "control_acl")) {
 		p = strtok(NULL, " ");
 		if (p) control_acl = atoi(p);
 		if (control_acl < 0 || control_acl >= ACLS_MAX)
 			control_acl = 0;
-		sprintf(b, "%d\n", control_acl);
-		output(b, op);
+		output(op, "%d\n", control_acl);
 	} else if (!strcmp(p, "debug")) {
 		p = strtok(NULL, " ");
 		if (p) debuglevel = atoi(p);
-		sprintf(b, "%d\n", debuglevel);
-		output(b, op);
-	} else if (!strcmp(p, "delayed_forward")) {
-		delayed_forward = 1;
+		output(op, "%d\n", debuglevel);
+	} else if (!strcmp(p, "dummy")) {
+		dummy = 1;
+	} else if (!strcmp(p, "epoll")) {
+		event_init = epoll_init;
 	} else if (!strcmp(p, "exit")) {
 		if (exit_enabled) {
 			quit(0);
 		} else {
-			sprintf(b,
-				"Exit is not enabled; restart with -X flag\n");
-			output(b, op);
+			output(op, "Exit is not enabled; restart with -X flag\n");
 		}
 	} else if (!strcmp(p, "hash")) {
 		hash = 1;
 	} else if (!strcmp(p, "http")) {
 		http = 1;
+	} else if (!strcmp(p, "idlers")) {
+		p = strtok(NULL, " ");
+		if (p) idlers_wanted = atoi(p);
+		output(op, "Idlers: %d/%d\n", idlers, idlers_wanted);
 	} else if (!strcmp(p, "include")) {
 		p = strtok(NULL, " ");
 		if (p) {
@@ -1936,9 +2660,24 @@ static void do_cmd(char *b, void (*output)(char *, void *), void *op)
 		} else {
 			debug("Usage: include filename");
 		}
+	} else if (!strcmp(p, "keepalive")) {
+		keepalive = 1;
+	} else if (!strcmp(p, "kqueue")) {
+		event_init = kqueue_init;
 	} else if (!strcmp(p, "listen")) {
-		sprintf(b, "%s\n", listenport);
-		output(b, op);
+		p = strtok(NULL, " ");
+		if (p) {
+			snprintf(listenport, sizeof listenport, "%s", p);
+			if (listenfd != -1) {
+				n = close(listenfd);
+				DEBUG(2, "close(listenfd=%d) returns %d", listenfd, n);
+			}
+			listenfd = open_listener(p);
+			/* we may need to defer this if we haven't called event_init yet */
+			if (event_add) event_add(listenfd, EVENT_READ);
+			DEBUG(2, "new listenfd = %d", listenfd);
+		}
+		output(op, "%s\n", listenport);
 	} else if (!strcmp(p, "log")) {
 		p = strtok(NULL, " ");
 		if (p) {
@@ -1947,41 +2686,35 @@ static void do_cmd(char *b, void (*output)(char *, void *), void *op)
 			open_log(logfile);
 		}
 		if (logfile) {
-			sprintf(b, "%s\n", logfile);
-			output(b, op);
+			output(op, "%s\n", logfile);
 		}
 	} else if (!strcmp(p, "mode")) {
-		sprintf(b, "%sblock %sdelayed_forward %shash %sroundrobin %sstubborn %sweight %sprio\n",
-			nblock?"no ":"",
-			delayed_forward?"":"no ",
+		output(op, "%shash %sroundrobin %sstubborn %sweight %sprio\n",
 			hash?"":"no ",
 			roundrobin?"":"no ",
 			stubborn?"":"no ",
 			weight?"":"no ",
 			prio?"":"no ");
-		output(b, op);
 	} else if (!strcmp(p, "no")) {
 		p = strtok(NULL, " ");
 		if (p == NULL) return;
-		if (!strcmp(p, "acl")) {
+		if (!strcmp(p, "abort_on_error")) {
+			abort_on_error = 0;
+		} else if (!strcmp(p, "acl")) {
 			int a;
 			p = strtok(NULL, " ");
 			a = atoi(p);
 			del_acl(a);
 		} else if (!strcmp(p, "ascii")) {
 			asciidump = 0;
-		} else if (!strcmp(p, "block")) {
-			nblock = 1;
-			fl = fcntl(listenfd, F_GETFL, 0);
-			fcntl(listenfd, F_SETFL, fl | O_NONBLOCK);
-			fl = fcntl(ctrlfd, F_GETFL, 0);
-			fcntl(ctrlfd, F_SETFL, fl | O_NONBLOCK);
-		} else if (!strcmp(p, "delayed_forward")) {
-			delayed_forward = 0;
+		} else if (!strcmp(p, "dummy")) {
+			dummy = 0;
 		} else if (!strcmp(p, "hash")) {
 			hash = 0;
 		} else if (!strcmp(p, "http")) {
 			http = 0;
+		} else if (!strcmp(p, "keepalive")) {
+			keepalive = 0;
 		} else if (!strcmp(p, "log")) {
 			logfile = NULL;
 			if (logfp) fclose(logfp);
@@ -1992,50 +2725,60 @@ static void do_cmd(char *b, void (*output)(char *, void *), void *op)
 			roundrobin = 0;
 		} else if (!strcmp(p, "stubborn")) {
 			stubborn = 0;
+		} else if (!strcmp(p, "tcp_nodelay")) {
+			tcp_nodelay = 0;
 		} else if (!strcmp(p, "web_stats")) {
 			webfile = NULL;
 		} else if (!strcmp(p, "weight")) {
 			weight = 0;
 		}
 	} else if (!strcmp(p, "pid")) {
-		sprintf(b, "%ld\n", (long)getpid());
-		output(b, op);
+		output(op, "%ld\n", (long)getpid());
+	} else if (!strcmp(p, "poll")) {
+		event_init = poll_init;
 	} else if (!strcmp(p, "prio")) {
 		prio = 1;
 	} else if (!strcmp(p, "recent")) {
-		time_t when = time(NULL);
+		time_t when = now;
 		p = strtok(NULL, " ");
 		if (p) when -= atoi(p);
 		else when -= 300;
 		for (n = 0; n < clients_max; n++) {
 			if (clients[n].last < when) continue;
-			sprintf(b, "%s connects %ld sx %lld rx %lld\n",
+			output(op, "%s connects %ld sx %lld rx %lld\n",
 				pen_ntoa(&clients[n].addr),
 				clients[n].connects,
 				clients[n].csx, clients[n].crx);
-			output(b, op);
 		}
 	} else if (!strcmp(p, "roundrobin")) {
 		roundrobin = 1;
+	} else if (!strcmp(p, "select")) {
+		event_init = select_init;
 	} else if (!strcmp(p, "server")) {
 		p = strtok(NULL, " ");
 		if (p == NULL) return;
 		n = atoi(p);
 		if (n < 0 || n >= nservers) return;
 		while ((p = strtok(NULL, " ")) && (q = strtok(NULL, " "))) {
-			struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[n].addr;
 			if (!strcmp(p, "acl")) {
 				servers[n].acl = atoi(q);
 			} else if (!strcmp(p, "address")) {
-				setipaddress(&(a4->sin_addr), q);
+				int result;
+				debug("do_cmd: server %d address %s", n, q);
+				result = pen_aton(q, &servers[n].addr);
+				DEBUG(1, "pen_aton returns %d\n" \
+					"address family = %d", \
+					n, servers[n].addr.ss_family);
+				if (debuglevel > 1) pen_dumpaddr(&servers[n].addr);
+				if (result != 1) return;
 			} else if (!strcmp(p, "port")) {
-				a4->sin_port = htons(atoi(q));
+				pen_setport(&servers[n].addr, atoi(q));
 			} else if (!strcmp(p, "max")) {
 				servers[n].maxc = atoi(q);
 			} else if (!strcmp(p, "hard")) {
 				servers[n].hard = atoi(q);
 			} else if (!strcmp(p, "blacklist")) {
-				servers[n].status = time(NULL)+atoi(q)-blacklist_time;
+				servers[n].status = now+atoi(q)-blacklist_time;
 			} else if (!strcmp(p, "weight")) {
 				servers[n].weight = atoi(q);
 			} else if (!strcmp(p, "prio")) {
@@ -2044,37 +2787,59 @@ static void do_cmd(char *b, void (*output)(char *, void *), void *op)
 		}
 	} else if (!strcmp(p, "servers")) {
 		for (n = 0; n < nservers; n++) {
-			struct sockaddr_in *a4 = (struct sockaddr_in *)&servers[n].addr;
-			sprintf(b, "%d addr %s port %d conn %d max %d hard %d weight %d prio %d sx %llu rx %llu\n",
-				n, inet_ntoa(a4->sin_addr), ntohs(a4->sin_port),
+			output(op,
+				"%d addr %s port %d conn %d max %d hard %d weight %d prio %d sx %llu rx %llu\n",
+				n, pen_ntoa(&servers[n].addr), pen_getport(&servers[n].addr),
 				servers[n].c, servers[n].maxc, servers[n].hard,
 				servers[n].weight, servers[n].prio,
 				servers[n].sx, servers[n].rx);
-			output(b, op);
 		}
+	} else if (!strcmp(p, "socket")) {
+		p = strtok(NULL, " ");
+		int fd = p ? atoi(p) : 0;
+		int conn = fd2conn_get(fd);
+		output(op, "Socket %d belongs to connection %d\n", fd, conn);
 	} else if (!strcmp(p, "status")) {
-		p = webfile;
-		webfile = "/tmp/webfile.html";
-		webstats();
-		fp = fopen(webfile, "r");
-		webfile = p;
-		if (fp == NULL) return;
-		while (fgets(b, sizeof b, fp)) {
-			output(b, op);
+		if (webstats()) {
+			fp = fopen(webfile, "r");
+			if (fp == NULL) {
+				output(op, "Can't read webstats\n");
+				return;
+			}
+			while (fgets(b, sizeof b, fp)) {
+				output(op, "%s", b);
+			}
+			fclose(fp);
+		} else {
+			output(op, "Unable to create webstats\n");
 		}
-		fclose(fp);
 	} else if (!strcmp(p, "stubborn")) {
 		stubborn = 1;
+	} else if (!strcmp(p, "tcp_fastclose")) {
+		p = strtok(NULL, " ");
+		if (!p) {
+			output(op, "do_cmd: ignoring tcp_fastclose without argument\n");
+			return;
+		}
+		if (!strcmp(p, "both")) {
+			tcp_fastclose = CS_CLOSED;
+		} else if (!strcmp(p, "up")) {
+			tcp_fastclose = CS_CLOSED_UP;
+		} else if (!strcmp(p, "down")) {
+			tcp_fastclose = CS_CLOSED_DOWN;
+		} else {
+			tcp_fastclose = 0;
+		}
+	} else if (!strcmp(p, "tcp_nodelay")) {
+		tcp_nodelay = 1;
 	} else if (!strcmp(p, "timeout")) {
 		p = strtok(NULL, " ");
 		if (p) timeout = atoi(p);
-		sprintf(b, "%d\n", timeout);
-		output(b, op);
+		output(op, "%d\n", timeout);
 	} else if (!strcmp(p, "tracking")) {
 		p = strtok(NULL, " ");
 		if (p) tracking_time = atoi(p);
-		sprintf(b, "%d\n", tracking_time);
-		output(b, op);
+		output(op, "%d\n", tracking_time);
 	} else if (!strcmp(p, "web_stats")) {
 		p = strtok(NULL, " ");
 		if (p) {
@@ -2082,8 +2847,7 @@ static void do_cmd(char *b, void (*output)(char *, void *), void *op)
 			webfile = pen_strdup(p);
 		}
 		if (webfile) {
-			sprintf(b, "%s\n", webfile);
-			output(b, op);
+			output(op, "%s\n", webfile);
 		}
 	} else if (!strcmp(p, "weight")) {
 		weight = 1;
@@ -2096,35 +2860,43 @@ static void do_cmd(char *b, void (*output)(char *, void *), void *op)
 			debug("write: no file");
 		}
 	} else {
-		debug("do_cmd: ignoring command starting with '%s'", p);
+		output(op, "do_cmd: ignoring command starting with '%s'\n", p);
 	}
 }
 
-static void output_net(char *b, void *op)
+static void output_net(void *op, char *fmt, ...)
 {
 	int *fp = op;
 	int n;
-	n = write(*fp, b, strlen(b));
+	char b[4096];
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(b, sizeof b, fmt, ap);
+	n = send(*fp, b, strlen(b), 0);
 	if (n == -1) {
 		debug("output_net: write failed");
 	}
+	va_end(ap);
 }
 
-static void output_file(char *b, void *op)
+static void output_file(void *op, char *fmt, ...)
 {
 	FILE *fp = op;
-	fputs(b, fp);
+	va_list ap;
+	va_start(ap, fmt);
+	vfprintf(fp, fmt, ap);
+	va_end(ap);
 }
 
-static void do_ctrl(int downfd, struct sockaddr_in *cli_addr)
+static void do_ctrl(int downfd, struct sockaddr_storage *cli_addr)
 {
 	char b[4096];
 	int n, max_b = sizeof b;
 
-	if (!match_acl_ipv4(control_acl, cli_addr->sin_addr.s_addr)) {
+	if (!match_acl(control_acl, cli_addr)) {
 		debug("do_ctrl: not from there");
 	} else {
-		n = read(downfd, b, max_b-1);
+		n = my_recv(downfd, b, max_b-1, 0);
 		if (n != -1) {
 			b[n] = '\0';
 			do_cmd(b, output_net, &downfd);
@@ -2138,6 +2910,8 @@ static void read_cfg(char *cf)
 	FILE *fp;
 	char b[4096];
 
+	DEBUG(1, "read_cfg(%s)", cf);
+	hupcounter++;
 	if (cf == NULL) return;
 
 	fp = fopen(cf, "r");
@@ -2151,28 +2925,44 @@ static void read_cfg(char *cf)
 	fclose(fp);
 }
 
+static int unused_server_slot(int i)
+{
+	struct sockaddr_storage *a = &servers[i].addr;
+	if (a->ss_family == AF_INET) {
+		struct sockaddr_in *si = (struct sockaddr_in *)a;
+		if (si->sin_addr.s_addr == 0) return i;
+	}
+	return 0;
+}
+
+static int server_is_blacklisted(int i)
+{
+	return (now-servers[i].status < blacklist_time);
+}
+
+static int server_is_unavailable(int i)
+{
+	return unused_server_slot(i) || server_is_blacklisted(i);
+}
+
 static int server_by_weight(void)
 {
 	int best_server = -1;
 	int best_load = -1;
 	int i, load;
-	int now = (int)time(NULL);
 
-	if (debuglevel) debug("server_by_weight()");
+	DEBUG(2, "server_by_weight()");
 	for (i = 0; i < nservers; i++) {
-		if (now-servers[i].status < blacklist_time || servers[i].weight == 0) {
-			continue;
-		}
+		if (server_is_unavailable(i)) continue;
+		if (servers[i].weight == 0) continue;
 		load = (WEIGHT_FACTOR*servers[i].c)/servers[i].weight;
 		if (best_server == -1 || load < best_load) {
-			if (debuglevel)
-				debug("Server %d has load %d",
-					i, load);
+			DEBUG(2, "Server %d has load %d", i, load);
 			best_load = load;
 			best_server = i;
 		}
 	}
-	if (debuglevel) debug("Least loaded server = %d", best_server);
+	DEBUG(2, "Least loaded server = %d", best_server);
 	return best_server;
 }
 
@@ -2181,31 +2971,105 @@ static int server_by_prio(void)
 	int best_server = -1;
 	int best_prio = -1;
 	int i, prio;
-	int now = (int)time(NULL);
 
-	if (debuglevel) debug("server_by_prio()");
+	DEBUG(2, "server_by_prio()");
 	for (i = 0; i < nservers; i++) {
-		if (now-servers[i].status < blacklist_time) {
-			continue;
-		}
+		if (server_is_unavailable(i)) continue;
 		prio = servers[i].prio;
 		if (best_server == -1 || prio < best_prio) {
-			if (debuglevel)
-				debug("Server %d has prio %d", i, prio);
+			DEBUG(2, "Server %d has prio %d", i, prio);
 			best_prio = prio;
 			best_server = i;
 		}
 	}
-	if (debuglevel) debug("Best prio server = %d", best_server);
+	DEBUG(2, "Best prio server = %d", best_server);
 	return best_server;
 }
 
-static void add_client(int downfd, struct sockaddr_in *cli_addr)
+static int server_by_roundrobin(void)
 {
-	int upfd = -1, clino = -1, index = -1, n, pd;
-	unsigned int cli = cli_addr->sin_addr.s_addr;
-	struct sockaddr_in serv_addr, addr_client;
-#ifdef HAVE_SSL
+	static int last_server = 0;
+	int i = last_server;
+
+	do {
+		i = (i+1) % nservers;
+		DEBUG(3, "server_by_roundrobin considering server %d", i);
+		if (!server_is_unavailable(i)) return (last_server = i);
+		DEBUG(3, "server %d is unavailable, try next one", i);
+	} while (i != last_server);
+	return -1;
+}
+
+/* Suggest a server for the initial field of the connection.
+   Return -1 if none available.
+*/
+static int initial_server(int conn)
+{
+	int pd = match_acl(client_acl, &clients[conns[conn].client].addr);
+	if (!pd) {
+		DEBUG(1, "initial_server: denied by acl");
+		return abuse_server;
+	}
+	if (!roundrobin) {
+		// Load balancing with memory == No roundrobin
+		int server = clients[conns[conn].client].server;
+		/* server may be -1 if this is a new client */
+		if (server != -1 && server != emerg_server && server != abuse_server) {
+			return server;
+		}
+	}
+	if (prio) return server_by_prio();
+	if (weight) return server_by_weight();
+	if (hash) return pen_hash(&clients[conns[conn].client].addr);
+	return server_by_roundrobin();
+}
+
+/* Returns 1 if a failover server candidate is available.
+   Close connection and return 0 if none was found.
+*/
+static int failover_server(int conn)
+{
+	int server = conns[conn].server;
+	DEBUG(2, "failover_server(%d)", conn);
+	if (stubborn) {
+		DEBUG(2, "Won't failover because we are stubborn");
+		close_conn(conn);
+		return 0;
+	}
+	if (server == abuse_server) {
+		DEBUG(2, "Won't failover from abuse server");
+		close_conn(conn);
+		return 0;
+	}
+	if (server == emerg_server) {
+		DEBUG(2, "Already using emergency server, won't fail over");
+		close_conn(conn);
+		return 0;
+	}
+	if (conns[conn].upfd != -1) {
+		close(conns[conn].upfd);
+		conns[conn].upfd = -1;
+	}
+	do {
+		server = (server+1) % nservers;
+		DEBUG(2, "Intend to try server %d", server);
+		if (try_server(server, conn)) return 1;
+	} while (server != conns[conn].initial);
+	DEBUG(1, "using emergency server, remember to reset flag");
+	emergency = 1;
+	if (try_server(emerg_server, conn)) return 1;
+	close_conn(conn);
+	return 0;
+}
+
+static void add_client(int downfd, struct sockaddr_storage *cli_addr)
+{
+	int rc = 0;
+	unsigned char b[BUFFER_MAX];
+	int client = -1;
+	int conn = -1;
+
+#ifdef HAVE_LIBSSL
 	SSL *ssl = NULL;
 
 	/* check the ssl stuff before picking servers */
@@ -2215,185 +3079,121 @@ static void add_client(int downfd, struct sockaddr_in *cli_addr)
 			int err = ERR_get_error();
 			debug("SSL: error allocating handle: %s",
 				ERR_error_string(err, NULL));
-			goto Failure;
+			return;
 		}
 		SSL_set_fd(ssl, downfd);
 		SSL_set_accept_state(ssl);
 	}
 #endif
 
-	pd = match_acl_ipv4(client_acl, cli);
-	if (!pd) {
-		if (debuglevel) debug("add_client: denied by acl");
-		if (abuse_server != -1) {
-			upfd = try_server(abuse_server, 0, cli, &serv_addr, &addr_client);
-			if (upfd != -1) goto Success;
+	/* we don't know the client address for udp until we read the message */
+	if (udp) {
+		socklen_t len = sizeof *cli_addr;
+		rc = recvfrom(listenfd, b, sizeof b, 0, (struct sockaddr *)cli_addr, &len);
+		DEBUG(2, "add_client: received %d bytes from client", rc);
+		if (rc < 0) {
+			if (errno != EINTR)
+				debug("Error receiving data");
+			return;
 		}
-		goto Failure;
 	}
+	client = store_client(cli_addr);	// no server yet
+	DEBUG(2, "store_client returns %d", client);
 
-	if (!roundrobin) {
-		// Load balancing with memory == No roundrobin
-		clino = lookup_client(cli_addr->sin_addr);
-		if (debuglevel) debug("lookup_client returns %d", clino);
-		if (clino != -1) {
-			index = clients[clino].cno;
-			if (index != emerg_server && index != abuse_server) {
-				upfd = try_server(index, 1, cli, &serv_addr, &addr_client);
-				if (upfd != -1) goto Success;
-			}
-		}
-	}
-	if (prio) {
-		index = server_by_prio();
-		if (index != -1) {
-			upfd = try_server(index, 0, cli, &serv_addr, &addr_client);
-			if (upfd != -1) goto Success;
-		}
-	}
-	if (weight) {
-		index = server_by_weight();
-		if (index != -1) {
-			upfd = try_server(index, 0, cli, &serv_addr, &addr_client);
-			if (upfd != -1) goto Success;
-		}
-	}
-	if (hash) {
-		index = cli % nservers;
-		upfd = try_server(index, 0, cli, &serv_addr, &addr_client);
-		if (upfd != -1) goto Success;
-	}
-
-	if (!stubborn) {
-		index = current;
-		do {
-			index = (index + 1) % nservers;
-			if ((upfd = try_server(index, 0, cli, &serv_addr, &addr_client)) != -1) goto Success;
-		} while (index != current);
-		if (upfd == -1) goto Failure;
-	}
-	/* if we get here, we're dead */
-	if (emerg_server != -1) {
-		if (!emergency) 
-			debug("Using emergency server");
-		emergency=1;
-		if ((upfd = try_server(emerg_server, 0, cli, &serv_addr, &addr_client)) != -1) goto Success2;
-	}
-	debug("Couldn't find a server for client");
-Failure:
-	if (!udp){
-	if (downfd != -1) close(downfd);
-	if (upfd != -1) close(upfd);
-	}
-	return;
-Success:
-	emergency=0;
-Success2:
-	n = store_client(clino, cli_addr->sin_addr, index);
-#ifdef HAVE_SSL
-	store_conn(downfd, ssl, upfd, n, index, &serv_addr, cli_addr, &addr_client);
+#ifdef HAVE_LIBSSL
+	conn = store_conn(downfd, ssl, client);
 #else
-	store_conn(downfd, upfd, n, index, &serv_addr, cli_addr, &addr_client);
+	conn = store_conn(downfd, client);
 #endif
-	return;
-}
+	DEBUG(2, "store_conn returns %d", conn);
 
-static int open_listener(char *a)
-{
-	int listenfd;
-	struct sockaddr_in serv_addr;
-	char b[1024], *p;
-	int one = 1;
-	int fl;
-	int optval = 1;
+	if (dummy) {	/* don't bother with a server */
+		conns[conn].initial = -1;
+		conns[conn].upfd = -1;
+		conns[conn].state = CS_CONNECTED|CS_CLOSED_UP;
+		if (!udp) event_add(conns[conn].downfd, EVENT_READ);
+		return;
+	}
 
-	memset(&serv_addr, 0, sizeof serv_addr);
-	serv_addr.sin_family = AF_INET;
-	p = strchr(a, ':');
-	if (p) {
-		strncpy(b, a, sizeof b);
-		b[sizeof b-1] = '\0';
-		p = strrchr(b, ':');
-		*p = '\0';
-		port = getport(p+1, proto);
-		p = strchr(b, ':');
-		if (p) {
-			debug("This looks like an IPv6 address, you nutjob.");
-			return -1;
+	conns[conn].initial = initial_server(conn);
+	if (conns[conn].initial == -1) {
+		DEBUG(1, "No initial server found, giving up");
+		close_conn(conn);
+		return;
+	}
+	if (!try_server(conns[conn].initial, conn)) {
+		/* try_server rejected the client, try another */
+		if (!failover_server(conn)) {
+			DEBUG(1, "No failover server found, giving up");
+			//close_conn(conn);
+			return;
 		}
-		setipaddress(&serv_addr.sin_addr, b);
-		snprintf(b, (sizeof(b) - 1), "%s", inet_ntoa(serv_addr.sin_addr));
-	} else {
-		port = getport(a, proto);
-		serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-		sprintf(b, "0.0.0.0");
-	}
-	serv_addr.sin_port = htons(port);
-
-	if ((listenfd = socket(AF_INET, protoid, 0)) < 0) {
-		error("can't open stream socket");
 	}
 
-	if (debuglevel) debug("local address=[%s:%d]", b, port);
-
-	setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (char *)&one, sizeof one);
-	setsockopt(listenfd, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof optval);
-
-	if (bind(listenfd, (struct sockaddr *) &serv_addr,
-		 sizeof serv_addr) < 0) {
-		error("can't bind local address");
+	if (udp && rc > 0) {	/* pass on the message */
+		/* we are "connected" and don't need sendto */
+		rc = send(conns[conn].upfd, b, rc, 0);
+		DEBUG(2, "add_client: wrote %d bytes to socket %d", rc, conns[conn].upfd);
 	}
-
-	if (nblock) {
-		if ((fl = fcntl(listenfd, F_GETFL, 0)) == -1)
-			error("Can't fcntl, errno = %d", errno);
-		if (fcntl(listenfd, F_SETFL, fl | O_NONBLOCK) == -1)
-			error("Can't fcntl, errno = %d", errno);
-	}
-	listen(listenfd, 50);
-	return listenfd;
 }
 
 static int flush_down(int i)
 {
-	int n;
+	int n, err = 0;
 
-#ifdef HAVE_SSL
+#ifdef HAVE_LIBSSL
 	SSL *ssl = conns[i].ssl;
 
 	if (ssl) {
 		n = SSL_write(ssl, conns[i].downbptr, conns[i].downn);
-		if (debuglevel) debug("SSL_write returns %d\n", n);
+		DEBUG(2, "SSL_write returns %d\n", n);
 		if (n < 0) {
 			int err = SSL_get_error(ssl, n);
-			if (debuglevel) debug("SSL_write returns %d (SSL error %d)", n, err);
+			DEBUG(1, "SSL_write returns %d (SSL error %d)", n, err);
 			if (err == SSL_ERROR_WANT_READ ||
 			    err == SSL_ERROR_WANT_WRITE) {
 				return 0;
 			}
 		}
 	} else {
-		n = write(conns[i].downfd, conns[i].downbptr, conns[i].downn);
+		n = my_send(conns[i].downfd, conns[i].downbptr, conns[i].downn, 0);
+		err = socket_errno;
 	}
 #else
 	struct sockaddr name;
 	size_t size = sizeof(struct sockaddr);
 
 	if (!udp)
-		n = write(conns[i].downfd, conns[i].downbptr, conns[i].downn);
+		n = my_send(conns[i].downfd, conns[i].downbptr, conns[i].downn, 0);
 	else
 		n = sendto(conns[i].downfd, conns[i].downbptr, conns[i].downn, 0,
 			(struct sockaddr *) &name, size);
-#endif  /* HAVE_SSL */
+	err = socket_errno;
+#endif  /* HAVE_LIBSSL */
 
-	if (debuglevel > 1) debug("flush_down(%d) %d bytes", i, n);
+	DEBUG(2, "flush_down(%d): send(%d, %p, %d, 0) returns %d, errno = %d, socket_errno = %d", \
+		i, conns[i].downfd, conns[i].downbptr, conns[i].downn, n, errno, socket_errno);
+	if (n == -1) {
+		if (!WOULD_BLOCK(err)) {
+			conns[i].state |= CS_CLOSED;
+			return -1;
+		}
+		n = 0;
+	}
 	if (n > 0) {
 		conns[i].downn -= n;
-		if (conns[i].downn == 0) 
+		if (conns[i].downn == 0) {
 			free(conns[i].downb);
-		else
+			if (dummy) {
+				conns[i].state |= CS_CLOSED;
+				return -1;
+			}
+			else change_events(i);
+		} else {
 			conns[i].downbptr += n;
-		clients[conns[i].clt].csx += n;
+		}
+		clients[conns[i].client].csx += n;
+		conns[i].csx += n;
 	}
 	return n;
 }
@@ -2401,34 +3201,56 @@ static int flush_down(int i)
 /* This only talks upstream and does not need ssl */
 static int flush_up(int i)
 {
-	int n;
+	int n, err = 0;
 
        struct sockaddr name;
        size_t size = sizeof(struct sockaddr);
 
 	if (!udp)
-		n = write(conns[i].upfd, conns[i].upbptr, conns[i].upn);
+		n = my_send(conns[i].upfd, conns[i].upbptr, conns[i].upn, 0);
 	else
 		n = sendto(conns[i].upfd, conns[i].upbptr, conns[i].upn, 0,
 			(struct sockaddr *) &name, size);
+	err = socket_errno;
 
-	if (debuglevel > 1) debug("flush_up(%d) %d bytes", i, n);
+	DEBUG(2, "flush_up(%d): send(%d, %p, %d, 0) returns %d, errno = %d, socket_errno = %d", \
+		i, conns[i].upfd, conns[i].upbptr, conns[i].upn, n, errno, socket_errno);
+	if (n == -1) {
+		if (!WOULD_BLOCK(err)) {
+			conns[i].state |= CS_CLOSED;
+			return -1;
+		}
+		n = 0;
+	}
 	if (n > 0) {
 		conns[i].upn -= n;
-		if (conns[i].upn == 0)
+		if (conns[i].upn == 0) {
 			free(conns[i].upb);
-		else
+			change_events(i);
+		} else {
 			conns[i].upbptr += n;
+		}
+		conns[i].ssx += n;
 	}
 	return n;
 }
 
-static void mainloop_select(void)
+/* For UDP, connection attempts to unreachable servers would sit in the
+   connection table forever unless we remove them by force.
+   This function is pretty brutal, it simply vacates the next slot
+   after the most recently used one. This will always succeed.
+*/
+static void recycle_connection(void)
 {
-	int downfd;
-	socklen_t clilen;
-	fd_set w_read, w_write, w_error;
-	int i, w_max, imax;
+	int i;
+
+	i = connections_last+1;
+	if (i >= connections_max) i = 0;
+	close_conn(i);
+}
+
+static void setup_signals(void)
+{
 	usr1action.sa_handler = stats;
 	sigemptyset(&usr1action.sa_mask);
 	usr1action.sa_flags = 0;
@@ -2448,575 +3270,334 @@ static void mainloop_select(void)
 	sigemptyset(&alrmaction.sa_mask);
 	alrmaction.sa_flags = 0;
 	signal(SIGPIPE, SIG_IGN);
+}
 
-	loopflag = 1;
-
-	if (debuglevel) debug("mainloop_select()");
-	while (loopflag) {
-		int n;
-
-		if (do_stats) {
-			if (webfile) webstats();
-			else textstats();
-			do_stats=0;
+static void check_signals(void)
+{
+	if (stats_flag) {
+		if (webfile) webstats();
+		else textstats();
+		stats_flag=0;
+	}
+	if (restart_log_flag) {
+		if (logfp) {
+			fclose(logfp);
+			logfp = fopen(logfile, "a");
+			if (!logfp) 
+				error("Can't open logfile %s", logfile);
 		}
-		if (do_restart_log) {
-			if (logfp) {
-				fclose(logfp);
-				logfp = fopen(logfile, "a");
-				if (!logfp) 
-					error("Can't open logfile %s", logfile);
+		read_cfg(cfgfile);
+		restart_log_flag=0;
+	}
+}
+
+static void check_listen_socket(void)
+{
+	struct sockaddr_storage cli_addr;
+	socklen_t clilen = sizeof cli_addr;
+	int i, downfd;
+	DEBUG(2, "check_listen_socket()");
+	/* special case for udp */
+	if (udp) {
+		downfd = listenfd;
+		add_client(downfd, &cli_addr);
+	} else {
+	/* process tcp connection(s) */
+		for (i = 0; i < multi_accept; i++) {
+			if (connections_used >= connections_max) break;
+			downfd = accept_nb(listenfd,
+				(struct sockaddr *)&cli_addr, &clilen);
+			if (downfd < 0) {
+				if (debuglevel && errno != EAGAIN) {
+					perror("accept");
+				}
+				break;
 			}
-			read_cfg(cfgfile);
-			do_restart_log=0;
+			if (clilen == 0) {
+				if (debuglevel) perror("clilen");
+				break;
+			}
+			add_client(downfd, &cli_addr);
 		}
-		FD_ZERO(&w_read);
-		FD_ZERO(&w_write);
-		FD_ZERO(&w_error);
-		w_max = 0;
-		/* no point accepting connections we can't handle */
-		if (debuglevel > 1) debug("last = %d, used = %d, max = %d",
-					connections_last,
-					connections_used,
-					connections_max);
+		DEBUG(2, "accepted %d connections", i);
+	}
+}
+
+
+static void check_control_socket(void)
+{
+	struct sockaddr_storage cli_addr;
+	socklen_t clilen = sizeof cli_addr;
+	int downfd = accept(ctrlfd, (struct sockaddr *) &cli_addr, &clilen);
+	DEBUG(2, "check_control_socket()");
+	if (downfd < 0) {
+		if (debuglevel) perror("accept");
+		return;
+	}
+	if (clilen == 0) {
+		if (debuglevel) perror("clilen");
+		return;
+	}
+	do_ctrl(downfd, &cli_addr);
+}
+
+static void check_if_connected(int i)
+{
+	int result;
+	socklen_t length = sizeof result;
+	DEBUG(2, "Something happened to connection %d", i);
+	if (getsockopt(conns[i].upfd, SOL_SOCKET, SO_ERROR, &result, &length) < 0) {
+		debug("Can't getsockopt: %s", strerror(errno));
+		close_conn(i);
+		return;
+	}
+	if (result != 0) {
+		debug("Connect failed: %s", strerror(result));
+		blacklist_server(conns[i].server);
+		if (failover_server(i) == 0) {
+			//close_conn(i);
+		}
+		return;
+	}
+	DEBUG(2, "Connection %d completed", i);
+	if (conns[i].state == CS_IN_PROGRESS) {
+		pending_list = dlist_remove(conns[i].pend);
+	}
+	conns[i].state = CS_CONNECTED;
+	if (conns[i].downfd == -1) {
+		/* idler */
+		conns[i].state |= CS_CLOSED_DOWN;
+	} else {
+		event_add(conns[i].downfd, EVENT_READ);
+	}
+	event_arm(conns[i].upfd, EVENT_READ);
+	servers[conns[i].server].c++;
+}
+
+static void check_if_timeout(time_t now, int i)
+{
+	DEBUG(2, "check_if_timeout(%d, %d)\n" \
+		"conns[%d].t = %d\n" \
+		"now-conns[%d].t = %d", \
+		(int)now, i, i, conns[i].t, i, now-conns[i].t);
+	if (now-conns[i].t > timeout) {
+		DEBUG(2, "Connection %d timed out", i);
+		blacklist_server(conns[i].server);
+		if (failover_server(i) == 0) {
+			//close_conn(i);
+		}
+	} else {
+		DEBUG(2, "Keep waiting...");
+	}
+}
+
+static int try_copy_up(int i)
+{
+	DEBUG(2, "want to read from downstream socket %d of connection %d", conns[i].downfd, i);
+	if (copy_up(i) < 0) {
+		//close_conn(i);
+		return 0;
+	}
+	return 1;
+}
+
+static int try_copy_down(int i)
+{
+	DEBUG(2, "want to read from upstream socket %d of connection %d", conns[i].upfd, i);
+	if (copy_down(i) < 0) {
+		//close_conn(i);
+		return 0;
+	}
+	return 1;
+}
+
+static int try_flush_down(int i)
+{
+	DEBUG(2, "want to write to downstream socket %d of connection %d", conns[i].downfd, i);
+	if (flush_down(i) < 0) {
+		//close_conn(i);
+		return 0;
+	}
+	return 1;
+}
+
+static int try_flush_up(int i)
+{
+	DEBUG(2, "want to write to upstream socket %d of connection %d", conns[i].upfd, i);
+	if (flush_up(i) < 0) {
+		//close_conn(i);
+		return 0;
+	}
+	return 1;
+}
+
+static void arm_listenfd(void)
+{
+	static int can_accept = 0;
+
+	if (can_accept) {
+		if (connections_used >= connections_max) {
+			event_arm(listenfd, 0);
+			can_accept = 0;
+		}
+	} else {
 		if (connections_used < connections_max) {
-			if (!udp || udpused == 0){
-				FD_SET(listenfd, &w_read);  /* new connections */
-				w_max = listenfd+1;
-			}
-		} else {
-			if (debuglevel) debug("Not listening");
-		}
-		if (ctrlfd != -1) {
-			FD_SET(ctrlfd, &w_read);
-			if (ctrlfd > listenfd) w_max = ctrlfd+1;
-		}
-
-		/* add sockets from open connections */
-		if (udp) /* udp has a secuential proccess */
-			imax = 1;
-		else
-			imax = connections_max;
-
-		for (i = 0; i < imax; i++) {
-			if (conns[i].downfd == -1) continue;
-			if (conns[i].upn == 0) {
-				FD_SET(conns[i].downfd, &w_read);
-				if (conns[i].downfd+1 > w_max) {
-					w_max = conns[i].downfd+1;
-				}
-			} else {
-				FD_SET(conns[i].upfd, &w_write);
-				if (conns[i].upfd+1 > w_max) {
-					w_max = conns[i].upfd+1;
-				}
-			}
-			if (conns[i].downn == 0) {
-				FD_SET(conns[i].upfd, &w_read);
-				if (conns[i].upfd+1 > w_max) {
-					w_max = conns[i].upfd+1;
-				}
-			} else {
-				FD_SET(conns[i].downfd, &w_write);
-				if (conns[i].downfd+1 > w_max) {
-					w_max = conns[i].downfd+1;
-				}
-			}
-		}
-
-		/* Wait for a connection from a client process. */
-		n = select(w_max, &w_read, &w_write, /*&w_error*/0, 0);
-		if (n < 0 && errno != EINTR) {
-			perror("select");
-			error("Error on select");
-		}
-		if (n <= 0) continue;
-
-	if (!udp || (udp && (udpused == 0))){
-		if (FD_ISSET(listenfd, &w_read)) {
-			struct sockaddr_in cli_addr;
-			clilen = sizeof cli_addr;
-			if (!udp) {
-				downfd = accept(listenfd,
-					(struct sockaddr *) &cli_addr, &clilen);
-				if (downfd < 0) {
-					if (debuglevel) perror("accept");
-					continue;
-				}
-				if (clilen == 0) {
-					if (debuglevel) perror("clilen");
-					continue;
-				}
-			} else {
-				downfd = listenfd;
-				udpused = 1;
-			}
-			add_client(downfd, &cli_addr);
-		}
-	}
-
-		/* check control port */
-		if (ctrlfd != -1 && FD_ISSET(ctrlfd, &w_read)) {
-//			connection_ctrl = 1;
-			struct sockaddr_in cli_addr;
-			clilen = sizeof cli_addr;
-			downfd = accept(ctrlfd,
-				(struct sockaddr *) &cli_addr, &clilen);
-			if (downfd < 0) {
-				if (debuglevel) perror("accept");
-				continue;
-			}
-			if (clilen == 0) {
-				if (debuglevel) perror("clilen");
-				continue;
-			}
-			do_ctrl(downfd, &cli_addr);
-		}
-
-		/* check sockets from open connections */
-		if (udp){
-			i=0;
-			if (conns[i].downfd == -1 || conns[i].upfd == -1 || udpused==3){
-				alarm(0);
-				close_conn(i);
-				udpused=0;
-			} else {
-			if (udpused!=2){
-				sigaction(SIGALRM, &alrmaction, NULL);
-				alarm(timeout);
-				if (FD_ISSET(conns[i].downfd, &w_read)) {
-					udpused = 2;
-					if (copy_up(i) < 0) {
-						udpused = 0;
-						close_conn(i);
-					}
-				}
-			}
-			if (FD_ISSET(conns[i].upfd, &w_read)) {
-				copy_down(i);
-				close_conn(i);
-				alarm(0);
-				udpused=0;
-			}
-			}
-		} else {		/* TCP */
-		for (i = 0; i < connections_max; i++) {
-			if (conns[i].downfd == -1) continue;
-			if (FD_ISSET(conns[i].downfd, &w_read)) {
-				if (copy_up(i) < 0) {
-					close_conn(i);
-					continue;
-				}
-			}
-			if (FD_ISSET(conns[i].upfd, &w_read)) {
-				if (copy_down(i) < 0) {
-					close_conn(i);
-					continue;
-				}
-			}
-			if (FD_ISSET(conns[i].downfd, &w_write)) {
-				if (flush_down(i) < 0) {
-					close_conn(i);
-					continue;
-				}
-			}
-			if (FD_ISSET(conns[i].upfd, &w_write)) {
-				if (flush_up(i) < 0) {
-					close_conn(i);
-					continue;
-				}
-			}
-		}
+			event_arm(listenfd, EVENT_READ);
+			can_accept = 1;
 		}
 	}
 }
 
-#ifdef HAVE_POLL
-static void dump_pollfd(struct pollfd *ufds, int nfds)
+static int handle_events(int *pending_close)
 {
-	int i;
-	for (i = 0; i < nfds; i++) {
-		debug("%d: <%d,%d,%d>", i,
-			ufds[i].fd, (int)ufds[i].events, (int)ufds[i].revents);
-	}
+	int fd, conn, events;
+	int npc = 0;
+
+        for (fd = event_fd(&events); fd != -1; fd = event_fd(&events)) {
+		int closing = 0;
+		DEBUG(2, "event_fd returns fd=%d, events=%d", fd, events);
+		if (events == 0) continue;
+                if (fd == listenfd) {
+                        if (events & EVENT_READ) {
+                                check_listen_socket();
+                        }
+                        continue;
+                }
+                if (fd == ctrlfd) {
+                        if (events & EVENT_READ) {
+                                check_control_socket();
+                        }
+                        continue;
+                }
+                conn = fd2conn_get(fd);
+		DEBUG(3, "fd = %d => conn = %d", fd, conn);
+		if (conn == -1) continue;
+                if (conns[conn].state & CS_IN_PROGRESS) {
+                        if (fd == conns[conn].upfd && events & EVENT_WRITE) {
+                                check_if_connected(conn);
+                        }
+                        continue;
+                }
+                if (fd == conns[conn].downfd) {
+                        if (!udp && (events & EVENT_READ)) {
+                                if (!try_copy_up(conn)) closing = 1;
+                        }
+                        if (events & EVENT_WRITE) {
+                                if (!try_flush_down(conn)) closing = 1;
+                        }
+                } else {        /* down */
+                        if (events & EVENT_READ) {
+                                if (!try_copy_down(conn)) closing = 1;
+                        }
+                        if (!udp && (events & EVENT_WRITE)) {
+                                if (!try_flush_up(conn)) closing = 1;
+                        }
+                }
+		if (closing) {
+			pending_close[npc++] = conn;
+		}
+        }
+	return npc;
 }
 
-static void mainloop_poll(void)
+static void close_idlers(int n)
 {
-	int downfd, clilen;
-	struct sockaddr_in cli_addr;
-	struct pollfd *ufds;
-	int i, j, nfds;
-	short downevents, upevents;
-	signal(SIGUSR1, stats);
-	signal(SIGHUP, restart_log);
-	signal(SIGTERM, quit);
-	signal(SIGPIPE, SIG_IGN);
+	int conn;
 
-	loopflag = 1;
-
-	ufds = pen_malloc((connections_max*2+2)*sizeof *ufds);
-
-	if (debuglevel) debug("POLLIN = %d, POLLOUT = %d", (int)POLLIN, (int)POLLOUT);
-	if (debuglevel) debug("mainloop_poll()");
-	while (loopflag) {
-		int n;
-
-		if (do_stats) {
-			if (webfile) webstats();
-			else textstats();
-			do_stats=0;
-		}
-		if (do_restart_log) {
-			if (logfp) {
-				fclose(logfp);
-				logfp = fopen(logfile, "a");
-				if (!logfp) 
-					error("Can't open logfile %s", logfile);
-			}
-			read_cfg(cfgfile);
-			do_restart_log=0;
-		}
-		nfds = 0;
-		ufds[nfds].fd = listenfd;
-		ufds[nfds++].events = POLLIN;	/* new connections */
-		if (ctrlfd != -1) {
-			ufds[nfds].fd = ctrlfd;
-			ufds[nfds++].events = POLLIN;
-		}
-
-		/* add sockets from open connections */
-		if (debuglevel) debug("filling pollfd structure");
-		for (i = 0; i < connections_max; i++) {
-			if (conns[i].downfd == -1) continue;
-			upevents = downevents = 0;
-
-			if (conns[i].upn == 0) downevents |= POLLIN;
-			else upevents |= POLLOUT;
-
-			if (conns[i].downn == 0) upevents |= POLLIN;
-			else downevents |= POLLOUT;
-
-			if (downevents) {
-				ufds[nfds].fd = conns[i].downfd;
-				ufds[nfds++].events = downevents;
-			}
-			if (upevents) {
-				ufds[nfds].fd = conns[i].upfd;
-				ufds[nfds++].events = upevents;
-			}
-		}
-
-		if (debuglevel) dump_pollfd(ufds, nfds);
-
-		/* Wait for a connection from a client process. */
-		n = poll(ufds, nfds, -1);
-		if (debuglevel) debug("n = %d", n);
-		if (n < 0 && errno != EINTR) {
-			perror("poll");
-			error("Error on poll");
-		}
-		if (n <= 0) continue;
-
-		if (debuglevel) dump_pollfd(ufds, nfds);
-		j = 0;
-		if (debuglevel) debug("checking pollfd structure");
-		if (debuglevel) debug("revents[%d] = %d", j, (int)ufds[j].revents);
-		if (ufds[j].revents & POLLIN) {
-			clilen = sizeof cli_addr;
-			downfd = accept(listenfd,
-				(struct sockaddr *) &cli_addr, &clilen);
-			if (downfd < 0) {
-				if (debuglevel) perror("accept");
-				continue;
-			}
-			if (clilen == 0) {
-				if (debuglevel) perror("clilen");
-				continue;
-			}
-			add_client(downfd, &cli_addr);
-		}
-		j++;
-
-		/* check control port */
-		if (ctrlfd != -1 && (ufds[j++].revents & POLLIN)) {
-			if (debuglevel) debug("revents[%d] = %d", j-1, (int)POLLIN);
-			clilen = sizeof cli_addr;
-			downfd = accept(ctrlfd,
-				(struct sockaddr *) &cli_addr, &clilen);
-			if (downfd < 0) {
-				if (debuglevel) perror("accept");
-				continue;
-			}
-			if (clilen == 0) {
-				if (debuglevel) perror("clilen");
-				continue;
-			}
-			do_ctrl(downfd, &cli_addr);
-			j++;
-		}
-
-		/* check sockets from open connections */
-		for (i = 0; i < connections_max; i++) {
-			if (conns[i].downfd == -1) continue;
-
-			if (conns[i].downfd != ufds[j].fd) downevents = 0;
-			else downevents = ufds[j++].revents;
-
-			if (conns[i].upfd != ufds[j].fd) upevents = 0;
-			else upevents = ufds[j++].revents;
-
-			if (debuglevel) {
-				debug("conn = %d, upevents = %d, downevents = %d",
-					i, upevents, downevents);
-				if (downevents || upevents) {
-					debug("down[%d] = %d, up[%d] = %d",
-						i, downevents, i, upevents);
-			}
-		}
-			if (downevents & POLLIN) {
-				if (copy_up(i) < 0) {
-					close_conn(i);
-					continue;
-				}
-			}
-			if (upevents & POLLIN) {
-				if (copy_down(i) < 0) {
-					close_conn(i);
-					continue;
-				}
-			}
-			if (downevents & POLLOUT) {
-				if (flush_down(i) < 0) {
-					close_conn(i);
-					continue;
-				}
-			}
-			if (upevents & POLLOUT) {
-				if (flush_up(i) < 0) {
-					close_conn(i);
-					continue;
-				}
-			}
+	DEBUG(2, "close_idlers(%d)", n);
+	for (conn = 0; n > 0 && conn < connections_max; conn++) {
+		if (idler(conn)) {
+			DEBUG(3, "Closing idling connection %d", conn);
+			close_conn(conn);
+			n--;
 		}
 	}
 }
-#endif	/* HAVE_POLL */
 
-#ifdef HAVE_KQUEUE
-
-static void dump_kevent(struct kevent *kev, int nfds)
+static int add_idler(void)
 {
-	int i;
-	struct kevent *kptr;
-	for (i = 0; i < nfds; i++) {
-		kptr = &kev[i];
-		debug("kev[%d]: <i=%d, f=%d, f=%d, ff=%d, d=%d u=%p>", i,
-		    kptr->ident, kptr->filter, kptr->flags,
-		    kptr->fflags, kptr->data, kptr->udata);
+#ifdef HAVE_LIBSSL
+	int conn = store_conn(-1, NULL, -1);
+#else
+	int conn = store_conn(-1, -1);
+#endif
+	if (conn == -1) return 0;
+	conns[conn].initial = server_by_roundrobin();
+	if (conns[conn].initial == -1) {
+		close_conn(conn);
+		return 0;
 	}
-
+	if (!try_server(conns[conn].initial, conn)) {
+		if (!failover_server(conn)) {
+			close_conn(conn);
+			return 0;
+		}
+	}
+	idlers++;
+	return 1;
 }
 
-static void mainloop_kqueue(void)
+static void pending_and_closing(int *pending_close, int npc, time_t now)
 {
-	int downfd, clilen;
-	int kq;
-	struct kevent *kev, *kptr;
-	connection *conn;
-	struct sockaddr_in cli_addr;
-	int i, j, nfds;
-	short downevents, upevents;
+	int j, p, start;
 
-	loopflag = 1;
-
-	kq = kqueue();
-	if (kq == -1)
-	{
-		perror("kqueue");
-		error("Error creating kernel queue");
+	if (pending_list != -1) {
+		p = start = pending_list;
+		do {
+			int conn = dlist_value(p);
+			if (conns[conn].state == CS_IN_PROGRESS) {
+				check_if_timeout(now, conn);
+			}
+			p = dlist_next(p);
+		} while (p != start);
 	}
-
-	kev = pen_malloc((connections_max*2+2)*sizeof *kev);
-
-	if (debuglevel) debug("mainloop_kqueue()");
-	while (loopflag) {
-		int n;
-
-		if (do_stats) {
-			if (webfile) webstats();
-			else textstats();
-			do_stats=0;
+        for (j = 0; j < npc; j++) {
+		int conn = pending_close[j];
+                if (closing_time(conn)) {
+			close_conn(conn);
 		}
-		if (do_restart_log) {
-			if (logfp) {
-				fclose(logfp);
-				logfp = fopen(logfile, "a");
-				if (!logfp) 
-					error("Can't open logfile %s", logfile);
-			}
-			read_cfg(cfgfile);
-			do_restart_log=0;
-		}
-		kptr = kev;
-		nfds = 0;
-
-		/* FIXME: these two don't need to be done every loop;
-		 * they'll persist until the sockets are closed. But moving
-		 * them outside the loop adds complications (kptr initial
-		 * setting etc) */
-		EV_SET(kptr++, listenfd, EVFILT_READ, EV_ADD, 0, 0, 0);
-		nfds++;
-		if (ctrlfd != -1) {
-			EV_SET(kptr++, ctrlfd, EVFILT_READ, EV_ADD, 0, 0, 0);
-			nfds++;
-		}
-
-		/* add sockets from open connections */
-		if (debuglevel) debug("filling kqueue structure");
-		for (i = 0; i < connections_max; i++) {
-			if (conns[i].downfd == -1) continue;
-			upevents = downevents = 0;
-
-			if (conns[i].upn == 0)
-			{
-				EV_SET(kptr++, conns[i].downfd, EVFILT_READ,
-				    EV_ADD | EV_ONESHOT, 0, 0, &conns[i]);
-				nfds++;
-			}
-			else
-			{
-				EV_SET(kptr++, conns[i].upfd, EVFILT_WRITE,
-				    EV_ADD | EV_ONESHOT, 0, 0, &conns[i]);
-				nfds++;
-			}
-
-			if (conns[i].downn == 0)
-			{
-				EV_SET(kptr++, conns[i].upfd, EVFILT_READ,
-				    EV_ADD | EV_ONESHOT, 0, 0, &conns[i]);
-				nfds++;
-			}
-			else
-			{
-				EV_SET(kptr++, conns[i].downfd, EVFILT_WRITE,
-				    EV_ADD | EV_ONESHOT, 0, 0, &conns[i]);
-				nfds++;
-			}
-		}
-
-		if (debuglevel) dump_kevent(kev, nfds);
-
-		/* Wait for a connection from a client process. */
-		n = kevent(kq, kev, nfds, kev, nfds, NULL);
-		if (debuglevel) debug("n = %d", n);
-		if (n < 0 && errno != EINTR) {
-			perror("kevent");
-			error("Error on kevent");
-		}
-		if (n <= 0) continue;
-
-		if (debuglevel) debug("checking kqueue structure");
-		if (debuglevel) dump_kevent(kev, n);
-
-		for(j = 0 ; j < n ; j++)
-		{
-			kptr = &kev[j];
-
-			/* check listener */
-			if (kptr->ident == listenfd)
-			{
-				clilen = sizeof cli_addr;
-				downfd = accept(listenfd,
-					(struct sockaddr *) &cli_addr, &clilen);
-				if (downfd < 0) {
-					if (debuglevel) perror("accept");
-					continue;
-				}
-				if (clilen == 0) {
-					if (debuglevel) perror("clilen");
-					continue;
-				}
-				add_client(downfd, &cli_addr);
-				continue;
-			}
-
-			/* check control port */
-			if (ctrlfd != -1 && kptr->ident == ctrlfd)
-			{
-				clilen = sizeof cli_addr;
-				downfd = accept(ctrlfd,
-					(struct sockaddr *) &cli_addr, &clilen);
-				if (downfd < 0) {
-					if (debuglevel) perror("accept");
-					continue;
-				}
-				if (clilen == 0) {
-					if (debuglevel) perror("clilen");
-					continue;
-				}
-				do_ctrl(downfd, &cli_addr);
-				continue;
-			}
-
-			/* check sockets from open connections */
-			conn = (connection *)kptr->udata;
-			if (conn->downfd == -1) continue;
-
-			if (conn->downfd != kptr->ident)
-				downevents = 0;
-			else
-				downevents = kptr->filter;
-
-			if (conn->upfd != kptr->ident)
-				upevents = 0;
-			else
-				upevents = kptr->filter;
-
-			i = conn->i;
-			if (debuglevel) {
-				debug("conn = %d, upevents = %d, downevents = %d",
-					i, upevents, downevents);
-			}
-
-			if (downevents == EVFILT_READ) {
-				if (copy_up(i) < 0) {
-					close_conn(i);
-					continue;
-				}
-			}
-			if (upevents == EVFILT_READ) {
-				if (copy_down(i) < 0) {
-					close_conn(i);
-					continue;
-				}
-			}
-			if (downevents == EVFILT_WRITE) {
-				if (flush_down(i) < 0) {
-					close_conn(i);
-					continue;
-				}
-			}
-			if (upevents == EVFILT_WRITE) {
-				if (flush_up(i) < 0) {
-					close_conn(i);
-					continue;
-				}
-			}
-		}
+        }
+	if (idlers > idlers_wanted) {
+		close_idlers(idlers-idlers_wanted);
+	}
+	while (idlers < idlers_wanted) {
+		if (!add_idler()) break;
 	}
 }
-#endif	/* HAVE_KQUEUE */
+
+void mainloop(void)
+{
+        int npc;
+        int *pending_close;
+	event_init();
+	event_add(listenfd, EVENT_READ);
+	dlist_init(connections_max);
+	if (ctrlfd != -1) event_add(ctrlfd, EVENT_READ);
+        setup_signals();
+        loopflag = 1;
+        pending_close = pen_malloc(connections_max * sizeof *pending_close);
+	DEBUG(2, "mainloop()");
+        while (loopflag) {
+                check_signals();
+                if (udp && (connections_used >= connections_max)) recycle_connection();
+		arm_listenfd();
+                event_wait();
+                now = time(NULL);
+		DEBUG(2, "After event_wait()");
+		npc = handle_events(pending_close);
+		pending_and_closing(pending_close, npc, now);
+        }
+}
 
 static int options(int argc, char **argv)
 {
 	int c;
 	char b[1024];
 
-#ifdef HAVE_SSL
-	char *opt = "B:C:F:S:T:b:c:e:j:l:o:p:t:u:w:x:DHPQWXUadfhnrsE:K:G:A:ZRL:";
+#ifdef HAVE_LIBSSL
+	char *opt = "B:C:F:O:S:T:b:c:e:i:j:l:m:o:p:q:t:u:w:x:DHPQWXUadfhnrsE:K:G:A:ZRL:";
 #else
-	char *opt = "B:C:F:S:T:b:c:e:j:l:o:p:t:u:w:x:DHPQWXUadfhnrs";
+	char *opt = "B:C:F:O:S:T:b:c:e:i:j:l:m:o:p:q:t:u:w:x:DHPQWXUadfhnrs";
 #endif
 
 	while ((c = getopt(argc, argv, opt)) != -1) {
@@ -3028,7 +3609,8 @@ static int options(int argc, char **argv)
 			ctrlport = optarg;
 			break;
 		case 'D':
-			delayed_forward = 1;
+			fprintf(stderr, "Pen 0.26.0 removed the delayed forward feature,\n"
+					"making the -D option obsolete\n");
 			break;
 		case 'F':
 			cfgfile = optarg;
@@ -3036,11 +3618,14 @@ static int options(int argc, char **argv)
 		case 'H':
 			http = 1;
 			break;
+		case 'O':
+			do_cmd(optarg, output_file, stdout);
+			break;
 		case 'Q':
-			use_kqueue = 1;
+			event_init = kqueue_init;
 			break;
 		case 'P':
-			use_poll = 1;
+			event_init = poll_init;
 			break;
 		case 'S':
 			servers_max = atoi(optarg);
@@ -3078,14 +3663,29 @@ static int options(int argc, char **argv)
 		case 'h':
 			hash = 1;
 			break;
+		case 'i':
+#ifdef WINDOWS
+			install_service(optarg);
+#else
+			fprintf(stderr, "Windows only\n");
+#endif
+			exit(0);
 		case 'j':
 			jail = optarg;
 			break;
 		case 'l':
 			logfile = pen_strdup(optarg);
 			break;
+		case 'm':
+			multi_accept = atoi(optarg);
+			if (multi_accept < 1) {
+				fprintf(stderr, "multi_accept bumped to 1\n");
+				multi_accept = 1;
+			}
+			break;
 		case 'n':
-			nblock = 0;
+			fprintf(stderr, "Pen 0.26.0 and up uses only nonblocking sockets,\n"
+					"making the -n option obsolete\n");
 			break;
 		case 'o':
 			snprintf(b, sizeof b, "%s", optarg);
@@ -3093,6 +3693,13 @@ static int options(int argc, char **argv)
 			break;
 		case 'p':
 			pidfile = optarg;
+			break;
+		case 'q':
+			listen_queue = atoi(optarg);
+			if (listen_queue < 50) {
+				fprintf(stderr, "listen_queue bumped to 50\n");
+				listen_queue = 50;
+			}
 			break;
 		case 'r':
 			roundrobin = 1;
@@ -3107,7 +3714,12 @@ static int options(int argc, char **argv)
 			}
 			break;
 		case 'u':
+#ifdef WINDOWS
+			delete_service(optarg);
+			exit(0);
+#else
 			user = optarg;
+#endif
 			break;
 		case 'x':
 			connections_max = atoi(optarg);
@@ -3115,7 +3727,7 @@ static int options(int argc, char **argv)
 		case 'w':
 			webfile = pen_strdup(optarg);
 			break;
-#ifdef HAVE_SSL
+#ifdef HAVE_LIBSSL
 		case 'E':
 			certfile = optarg;
 			break;
@@ -3148,7 +3760,7 @@ static int options(int argc, char **argv)
 				exit(1);
 			}
 			break;
-#endif  /* HAVE_SSL */
+#endif  /* HAVE_LIBSSL */
 		case '?':
 		default:
 			usage();
@@ -3167,26 +3779,24 @@ int main(int argc, char **argv)
 	argc -= n;
 	argv += n;
 
-	if (argc < 1) {
-		usage();
-	}
+	now = time(NULL);
+#ifdef WINDOWS
+	start_winsock();
+#endif
 
-	if ((connections_max*2+10) > FD_SETSIZE && !use_poll) 
-		error("Number of simultaneous connections to large.\n"
-		      "Maximum is %d, or re-build pen with larger FD_SETSIZE",
-		      (FD_SETSIZE-10)/2);
-	
 	getrlimit(RLIMIT_CORE, &r);
 	r.rlim_cur = r.rlim_max;
 	setrlimit(RLIMIT_CORE, &r);
 
 	signal(SIGCHLD, SIG_IGN);
 
+#ifndef WINDOWS
 	if (!foreground) {
 		background();
 	}
+#endif
 
-#ifdef HAVE_SSL
+#ifdef HAVE_LIBSSL
 	if (certfile) {
 		ssl_init();
 	}
@@ -3194,8 +3804,13 @@ int main(int argc, char **argv)
 
 	/* we must open listeners before dropping privileges */
 	/* Control port */
-	if (ctrlport) ctrlfd = open_listener(ctrlport);
-	else ctrlfd = -1;
+	if (ctrlport) {
+		if (getuid() == 0 && user == NULL) {
+			debug("Won't open control port running as root; use -u to run as different user");
+		} else {
+			ctrlfd = open_listener(ctrlport);
+		}
+	}
 
 	/* Balancing port */
 	if (udp) {
@@ -3203,21 +3818,21 @@ int main(int argc, char **argv)
 		proto = "udp";
 	}
 
-	listenport = argv[0];
+	snprintf(listenport, sizeof listenport, "%s", argv[0]);
 	listenfd = open_listener(listenport);
 	init_mask();
 	init(argc, argv);
 
 	/* we must look up user id before chrooting */
 	if (user) {
-		if (debuglevel) debug("Run as user %s", user);
+		DEBUG(1, "Run as user %s", user);
 		pwd = getpwnam(user);
 		if (pwd == NULL) error("Can't getpwnam(%s)", user);
 	}
 
 	/* we must chroot before dropping privileges */
 	if (jail) {
-		if (debuglevel) debug("Run in %s", jail);
+		DEBUG(1, "Run in %s", jail);
 		if (chroot(jail) == -1) error("Can't chroot(%s)", jail);
 	}
 
@@ -3241,29 +3856,34 @@ int main(int argc, char **argv)
 		fclose(pidfp);
 	}
 
-#ifdef HAVE_GEOIP
-	geoip = GeoIP_new(GEOIP_MEMORY_CACHE);
-	if (geoip == NULL) debug("Could not initialize GeoIP");
+#ifdef HAVE_LIBGEOIP
+	geoip4 = GeoIP_open_type(GEOIP_COUNTRY_EDITION, GEOIP_MEMORY_CACHE);
+	if (geoip4 == NULL) debug("Could not initialize GeoIP for IPv4");
+	geoip6 = GeoIP_open_type(GEOIP_COUNTRY_EDITION_V6, GEOIP_MEMORY_CACHE);
+	if (geoip6 == NULL) debug("Could not initialize GeoIP for IPv6");
 #endif
 
-#ifdef HAVE_KQUEUE
-	if (use_kqueue) mainloop_kqueue();
+#ifdef WINDOWS
+	if (!foreground) {
+		char cfgdir[1024], *p, dirsep = '\\';
+		GetModuleFileName(NULL, cfgdir, sizeof cfgdir);
+		cfgdir[sizeof cfgdir - 1] = '\0';
+		p = strrchr(cfgdir, dirsep);
+		if (p) *p = '\0';
+		chdir(cfgdir);
+		read_cfg("pen.cfg");
+		service_main(0, NULL);
+	} else {
+		mainloop();
+	}
 #else
-	if (use_kqueue) error("You don't have kqueue()");
-#endif /* HAVE_KQUEUE */
+	mainloop();
+#endif
 
-#ifdef HAVE_POLL
-	if (use_poll) mainloop_poll();
-#else
-	if (use_poll) error("You don't have poll()");
-#endif	/* HAVE_POLL */
-
-	if (!use_kqueue && !use_poll) mainloop_select();
-
-	if (debuglevel) debug("Exiting, cleaning up...");
+	DEBUG(1, "Exiting, cleaning up...");
 	if (logfp) fclose(logfp);
 	for (i = 0; i < connections_max; i++) {
-		close_conn(i);
+		if (conns[i].downfd != -1) close_conn(i);
 	}
 	close(listenfd);
 	if (pidfile) {

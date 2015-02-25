@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2002-2013  Ulric Eriksson <ulric@siag.nu>
+   Copyright (C) 2002-2014  Ulric Eriksson <ulric@siag.nu>
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -267,7 +267,8 @@ int main(int argc, char **argv)
 {
 	struct passwd *pwd = NULL;
 	struct sockaddr_in a;
-	int ld, len, p;
+	socklen_t len;
+	int ld, p;
 	char b[1024];
 
 	int n = options(argc, argv);

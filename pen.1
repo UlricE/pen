@@ -5,7 +5,15 @@ pen
 
 .SH SYNOPSIS
 .B pen
-[-b sec] [-S N] [-c N] [-e host:port] [-t sec] [-x N] [-j dir] [-u user] [-F cfgfile] [-l logfile] [-p file ] [-w file] [-C port] [-T sec] [-HWXadfhnrs] [-o option] [-E certfile] [-K keyfile] [-G cacertfile] [-A cacertdir] [-Z] [-R] [-L protocol] [host:]port h1[:p1[:maxc1[:hard1[:weight1[:prio1]]]]] [h2[:p2[:maxc2[:hard2[:weight2[:prio2]]]]]] ...
+[-b sec] [-S N] [-c N] [-e host:port] [-t sec] [-x N] [-j dir] [-u user] [-F cfgfile] [-l logfile] [-p file ] [-w file] [-C port|/path/to/socket] [-T sec] [-HWXadfhrs] [-o option] [-E certfile] [-K keyfile] [-G cacertfile] [-A cacertdir] [-Z] [-R] [-L protocol] [host:]port|/path/to/socket h1[:p1[:maxc1[:hard1[:weight1[:prio1]]]]] [h2[:p2[:maxc2[:hard2[:weight2[:prio2]]]]]] ...
+
+Windows only:
+
+.B pen
+-i service_name
+
+.B pen
+-u service_name
 
 .SH EXAMPLE
 pen 80 www1:8000:10 www2:80:10 www3
@@ -67,14 +75,17 @@ log file and all open sockets.
 
 .SH OPTIONS
 .TP
--C \fIport\fR
-Specifies a control port where the load balancer listens for commands.
+-C \fIport|/path/to/socket\fR
+Specifies a control port where the load balancer listens for commands. See penctl.1 for a list of the commands available. The protocol is unauthenticated and the administrator is expected to restrict access using an access control list (for connections over a network) or Unix file permissions (for a Unix domain socket). Pen will normally refuse to open the control port if running as root; see -u option. If you still insist that you want to run pen as root with a control port, use "-u root".
 .TP
 -F \fIcfgfile\fR
 Names a configuration file with commands in penctl format (see penctl.1). The file is read after processing all command line arguments, and also after receiving a HUP signal.
 .TP
 -H
 Adds X-Forwarded-For header to http requests.
+.TP
+-O command
+Allows most penctl commands to be used on the Pen command line.
 .TP
 -P
 Use poll() for event notification.
@@ -121,17 +132,23 @@ Stay in foreground.
 Use a hash on the client IP address for the initial server selection.
 This makes it more predictable where clients will be connected.
 .TP
+-i \fIservice_name\fR
+Windows only. Install pen as a service.
+.TP
 -j \fIdir\fR
 Run in a chroot environment.
 .TP
 -l \fIfile\fR
 Turn on logging.
 .TP
--n
-Nonblocking.
+-m \fImulti_accept\fR
+Accept up to \fImulti_accept\fR incoming connections at a time.
 .TP
 -p \fIfile\fR
 Write the pid of the running daemon to \fIfile\fR.
+.TP
+-q \fIbacklog\fR
+Allow the queue of pending incoming connections to grow up to a maximum of \fIbacklog\fR entries.
 .TP
 -r
 Go straight into round-robin server selection without looking up
@@ -145,7 +162,10 @@ client connection is closed without trying another server.
 Connect timeout in seconds (default 5).
 .TP
 -u \fIuser\fR
-Run as a different user.
+Posix only. Run as a different user.
+.TP
+-u \fIservice_name\fR
+Windows only. Uninstall the service.
 .TP
 -x \fIN\fR
 Max number of simultaneous connections (default 256).
@@ -177,9 +197,10 @@ Require valid peer certificate.
 -L \fIprotocol\fR
 ssl23, ssl3 or tls1 (default).
 .TP
-host:port
+[host:]port OR /path/to/socket
 The local address and port pen listens to. By default pen listens to
-all local addresses.
+all local addresses. Pen can also use a Unix domain socket as the local
+listening address.
 .TP
 h1:p1:soft:hard:weight:prio
 The address, port and maximum number of simultaneous connections for
@@ -193,14 +214,15 @@ server selection algorithms.
 Pen runs in a single process, and opens two sockets for each connection.
 Depending on kernel configuration, pen can run out of file descriptors.
 
-The SSL support is only available if pen was built with the --with-ssl
-option.
+SSL support is available if pen was built with the --with-ssl option.
+
+GeoIP support is available if pen was built with the --with-geoip option.
 
 .SH SEE ALSO
 penctl(1), dwatch(1), mergelogs(1), webresolve(1)
 
 .SH AUTHOR
-Copyright (C) 2001-2014 Ulric Eriksson, <ulric@siag.nu>.
+Copyright (C) 2001-2015 Ulric Eriksson, <ulric@siag.nu>.
 
 .SH ACKNOWLEDGEMENTS
 In part inspired by balance by Thomas Obermair.

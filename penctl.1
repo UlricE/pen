@@ -5,12 +5,16 @@ penctl
 
 .SH SYNOPSIS
 .B penctl
-host:port command
+host:port|/path/to/socket command
 
 .SH EXAMPLE
 penctl lbhost:8888 roundrobin
 
 Turns off client tracking on the load balancer running on lbhost.
+
+penctl /var/run/pen/tmp/ctrl status
+
+Prints status information in html format.
 
 .SH DESCRIPTION
 .I Penctl
@@ -60,7 +64,7 @@ Return current blacklist time in seconds.
 Set the blacklist time in seconds.
 .TP
 \fIblock\fR
-Do not make sockets nonblocking.
+Do not make sockets nonblocking. This is obsolete as of 0.26.0 and does nothing.
 .TP
 \fIno block\fR
 Make sockets nonblocking.
@@ -71,13 +75,19 @@ Check connecting clients against access list N (default 0).
 \fIclients_max\fR
 Return max number of clients.
 .TP
+\fIclose N\fR
+Close connection N
+.TP
+\fIconnection N\fR
+Display some basic information about connection N.
+.TP
 \fIconn_max\fR
 Return max number of simultaneous connections.
 .TP
 \fIcontrol\fR
 Return address and port where pen listens for control connections.
 .TP
-\fIcontrol_acl\fR
+\fIcontrol_acl N\fR
 Check accesses to the control port against access list N (default 0).
 .TP
 \fIdebug\fR
@@ -87,10 +97,14 @@ Return current debug level.
 Set debug level to N.
 .TP
 \fIdelayed_forward\fR
-Always wait for the next round of the main loop before forwarding data. Normally pen tries to do that immediately.
+Always wait for the next round of the main loop before forwarding data. Normally pen tries to do that immediately. This is obsolete as of 0.26.0 and does nothing.
 .TP
 \fIno delayed_forward\fR
 Try to forward data immediately, to avoid the overhead of copying it to a temporary buffer and waiting for the next main loop round.
+.TP
+\fIepoll\fR
+Use epoll for event management (Linux).
+This is the default on Linux.
 .TP
 \fIexit\fR
 Exit. Only available if pen was started with the -X option.
@@ -107,11 +121,21 @@ Add X-Forwarded-For headers to http requests.
 \fIno http\fR
 Do not add X-Forwarded-For headers.
 .TP
+\fIidlers [N]\fR
+Create N reliable idle connections to the backend servers. Without argument, display the current/requested number of reliable idlers.
+.TP
 \fIinclude FILE\fR
 Read commands from file.
 .TP
+\fIkqueue\fR
+Use kqueue for event management (FreeBSD, NetBSD, OpenBSD).
+This is the default on the systems that have it.
+.TP
 \fIlisten\fR
 Return local address and port pen listens to for incoming client connections.
+.TP
+\fIlisten [address:]:port
+Close the listening socket and reopen using specified address (optional) and port.
 .TP
 \fIlog\fR
 Show where pen is logging, if anywhere.
@@ -128,6 +152,9 @@ Turn off logging.
 \fIpid\fR
 Return the process id of the running daemon
 .TP
+\fIpoll\fR
+Use poll for event management.
+.TP
 \fIprio\fR
 Use the priority based algorithm.
 .TP
@@ -143,11 +170,17 @@ Use round-robin server selection without client tracking
 \fIno roundrobin\fR
 
 .TP
+\fIselect\fR
+Use select for event management.
+.TP
 \fIserver N [ acl A | address A | port P | max M | hard H | blacklist T | weight W | prio P ]\fR
 Change acl, address, port, weight, priority and/or max connections for server N, or blacklist it for T seconds.
 .TP
 \fIservers\fR
 List address, port, weight, priority and max number of simultaneous connections for each remote server.
+.TP
+\fIsocket N\fR
+Show to which connection socket N belongs.
 .TP
 \fIstatus\fR
 Print status information in html format.
@@ -156,6 +189,15 @@ Print status information in html format.
 If the initial server selection is unavailable, close the client connection without trying another
 .TP
 \fIno stubborn\fR
+.TP
+\fItcp_fastclose up|down|both|off\fR
+Close both sockets to upstream and downstream if one of them closes theirs. Default = off.
+.TP
+\fItcp_nodelay\fR
+Set TCP_NODELAY on sockets, effectively turning off the Nagle algorithm.
+.TP
+\fIno tcp_nodelay\fR
+Do not set TCP_NODELAY on sockets. This is the default.
 .TP
 \fItimeout\fR
 Return current connect timeout in seconds.
@@ -188,4 +230,4 @@ Write the current configuration into a file which can be used to start pen. If F
 pen(1)
 
 .SH AUTHOR
-Copyright (C) 2002-2014 Ulric Eriksson, <ulric@siag.nu>.
+Copyright (C) 2002-2015 Ulric Eriksson, <ulric@siag.nu>.

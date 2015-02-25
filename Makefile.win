@@ -1,0 +1,28 @@
+CFLAGS=-Wall -O2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ggdb -DWINDOWS -D_WIN32_WINNT=0x0600 -DDEBUGGING
+OBJ=pen.o select.o poll.o kqueue.o epoll.o windows.o dlist.o
+LIB=-lws2_32 -lpsapi -lole32 -loleaut32 -luuid
+
+all:
+	cp config.h.win config.h
+	$(MAKE) -C X86 pen32.exe
+	$(MAKE) -C X64 pen64.exe
+
+pen32.exe: $(OBJ)
+	$(CC) -o pen32.exe $(OBJ) $(LIB)
+
+pen64.exe: $(OBJ)
+	$(CC) -o pen64.exe $(OBJ) $(LIB)
+
+pen.o: pen.c
+select.o: select.c
+poll.o: poll.c
+kqueue.o: kqueue.c
+epoll.o: epoll.c
+windows.o: windows.c
+dlist.o: dlist.c
+
+$(OBJ): pen.h config.h
+
+clean:
+	rm -f X86/*.o X64/*.o
+
