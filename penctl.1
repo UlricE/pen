@@ -121,6 +121,9 @@ Add X-Forwarded-For headers to http requests.
 \fIno http\fR
 Do not add X-Forwarded-For headers.
 .TP
+\fIidle_timeout N\fR
+Close connections that have been inactive for N seconds. Default 0 = never close.
+.TP
 \fIidlers [N]\fR
 Create N reliable idle connections to the backend servers. Without argument, display the current/requested number of reliable idlers.
 .TP

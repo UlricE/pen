@@ -1,4 +1,7 @@
 
+150227	Added check to close idle connections after a period of inactivity.
+	Penctl: idle_timeout N (default 0 = never close idle connections).
+
 150225	Moved git repository to GitHub..
 
 150225	New feature: dummy server. Rather than acting as a proxy,

@@ -176,6 +176,7 @@ void (*event_init)(void) = select_init;
 
 #define DUMMY_MSG "Ulric was here."
 
+static int idle_timeout = 0;	/* never time out */
 static int abort_on_error = 0;
 static int dummy = 0;		/* use pen as a test target */
 static int idlers = 0, idlers_wanted = 0;
@@ -2649,6 +2650,11 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		hash = 1;
 	} else if (!strcmp(p, "http")) {
 		http = 1;
+	} else if (!strcmp(p, "idle_timeout")) {
+		p = strtok(NULL, " ");
+		if (p) idle_timeout = atoi(p);
+		if (idle_timeout < 0) idle_timeout = 0;
+		output(op, "Idle timeout: %d seconds\n", idle_timeout);
 	} else if (!strcmp(p, "idlers")) {
 		p = strtok(NULL, " ");
 		if (p) idlers_wanted = atoi(p);
@@ -3364,6 +3370,7 @@ static void check_if_connected(int i)
 		pending_list = dlist_remove(conns[i].pend);
 	}
 	conns[i].state = CS_CONNECTED;
+	conns[i].t = now;
 	if (conns[i].downfd == -1) {
 		/* idler */
 		conns[i].state |= CS_CLOSED_DOWN;
@@ -3374,13 +3381,13 @@ static void check_if_connected(int i)
 	servers[conns[i].server].c++;
 }
 
-static void check_if_timeout(time_t now, int i)
+static void check_if_timeout(int i)
 {
 	DEBUG(2, "check_if_timeout(%d, %d)\n" \
 		"conns[%d].t = %d\n" \
 		"now-conns[%d].t = %d", \
 		(int)now, i, i, conns[i].t, i, now-conns[i].t);
-	if (now-conns[i].t > timeout) {
+	if (now-conns[i].t >= timeout) {
 		DEBUG(2, "Connection %d timed out", i);
 		blacklist_server(conns[i].server);
 		if (failover_server(i) == 0) {
@@ -3478,6 +3485,7 @@ static int handle_events(int *pending_close)
                         }
                         continue;
                 }
+		conns[conn].t = now;
                 if (fd == conns[conn].downfd) {
                         if (!udp && (events & EVENT_READ)) {
                                 if (!try_copy_up(conn)) closing = 1;
@@ -3537,7 +3545,7 @@ static int add_idler(void)
 	return 1;
 }
 
-static void pending_and_closing(int *pending_close, int npc, time_t now)
+static void pending_and_closing(int *pending_close, int npc)
 {
 	int j, p, start;
 
@@ -3546,7 +3554,7 @@ static void pending_and_closing(int *pending_close, int npc, time_t now)
 		do {
 			int conn = dlist_value(p);
 			if (conns[conn].state == CS_IN_PROGRESS) {
-				check_if_timeout(now, conn);
+				check_if_timeout(conn);
 			}
 			p = dlist_next(p);
 		} while (p != start);
@@ -3562,6 +3570,26 @@ static void pending_and_closing(int *pending_close, int npc, time_t now)
 	}
 	while (idlers < idlers_wanted) {
 		if (!add_idler()) break;
+	}
+}
+
+static void check_idle_timeout(void)
+{
+	static int conn = 0;
+	int i, n;
+
+	if (idle_timeout == 0) return;
+	n = connections_max/idle_timeout;
+
+	DEBUG(2, "check_idle_timeout(): conn=%d, n=%d", conn, n);
+	for (i = 0; i < n; i++) {
+		if (conns[conn].state == CS_CONNECTED &&
+		    now-conns[conn].t >= idle_timeout) {
+			DEBUG(2, "Connection %d idle for %d seconds, closing",
+				conn, now-conns[conn].t);
+			close_conn(conn);
+		}
+		conn = (conn+1)%connections_max;
 	}
 }
 
@@ -3585,7 +3613,8 @@ void mainloop(void)
                 now = time(NULL);
 		DEBUG(2, "After event_wait()");
 		npc = handle_events(pending_close);
-		pending_and_closing(pending_close, npc, now);
+		pending_and_closing(pending_close, npc);
+		check_idle_timeout();
         }
 }
 
