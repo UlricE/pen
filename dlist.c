@@ -27,19 +27,19 @@ static int alloc_node(void)
 /* Insert value into a new node. Return the resulting list. */
 int dlist_insert(int list, int value)
 {
-        int prev, next, new_node = alloc_node();
+        int new_node = alloc_node();
         if (new_node == -1) return -1;
         if (list == -1) {       /* empty */
-                prev = new_node;
-                next = new_node;
+		nodes[new_node].prev = new_node;
+		nodes[new_node].next = new_node;
+		
         } else {
-                prev = nodes[nodes[list].next].prev;
-                next = nodes[nodes[list].prev].next;
-                nodes[prev].next = new_node;
-                nodes[next].prev = new_node;
+                int prev = nodes[list].prev;
+		nodes[prev].next = new_node;
+		nodes[new_node].prev = prev;
+		nodes[new_node].next = list;
+		nodes[list].prev = new_node;
         }
-        nodes[new_node].prev = prev;
-        nodes[new_node].next = next;
         nodes[new_node].value = value;
         return new_node;
 }

@@ -1,6 +1,6 @@
 
 bin_PROGRAMS = pen mergelogs penctl penlog penlogd
-noinst_HEADERS = pen.h
+noinst_HEADERS = pen.h dlist.h
 
 pen_SOURCES = pen.c select.c poll.c kqueue.c epoll.c dlist.c
 mergelogs_SOURCES = mergelogs.c

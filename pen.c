@@ -74,6 +74,7 @@ GeoIP *geoip4, *geoip6;
 #endif
 
 #include "pen.h"
+#include "dlist.h"
 
 #define ACE_IPV4 (1)
 #define ACE_IPV6 (2)

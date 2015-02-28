@@ -1,4 +1,6 @@
 
+150228	Moved dlist prototypes to dlist.h.
+
 150227	Added check to close idle connections after a period of inactivity.
 	Penctl: idle_timeout N (default 0 = never close idle connections).
 
