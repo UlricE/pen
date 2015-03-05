@@ -32,6 +32,12 @@ Specifies a control port where the load balancer listens for commands.
 
 .SH COMMANDS
 .TP
+\fIabort_on_error\fR
+Call abort() when a fatal error is encountered. This will create a core file which allows further troubleshooting. Disabled by default.
+.TP
+\fIno abort_on_error\fR
+Exit normally on fatal error with an error code which indicates failure.
+.TP
 \fIacl N permit|deny sourceip4 [mask]\fR
 Adds an entry to access list N, where N is a number from 0 to 9. The source and mask addresses are in the usual dotted quad notation. If mask is omitted, it defaults to 255.255.255.255.
 
@@ -101,6 +107,12 @@ Always wait for the next round of the main loop before forwarding data. Normally
 .TP
 \fIno delayed_forward\fR
 Try to forward data immediately, to avoid the overhead of copying it to a temporary buffer and waiting for the next main loop round.
+.TP
+\fIdummy\fR
+Act as a dummy web server with very limited functionality but high performance. Only useful for testing. Disabled by default.
+.TP
+\fIno dummy\fR
+Do not act as a dummy web server.
 .TP
 \fIepoll\fR
 Use epoll for event management (Linux).
