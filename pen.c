@@ -227,8 +227,6 @@ static int client_acl, control_acl;
 static int udp = 0;
 static int protoid = SOCK_STREAM;
 
-static int port;
-
 static char *cfgfile = NULL;
 static char *logfile = NULL;
 static FILE *logfp = NULL;
@@ -238,6 +236,8 @@ static char *pidfile = NULL;
 static FILE *pidfp = NULL;
 static char *webfile = NULL;
 static char listenport[1000];
+static int port;
+
 static char *ctrlport = NULL;
 static int listenfd, ctrlfd = -1;
 static char *e_server = NULL;
@@ -2361,7 +2361,9 @@ static int open_listener(char *a)
 	char b[1024], *p;
 	int one = 1;
 	int optval = 1;
+#if 0
 	int port;
+#endif
 
 #ifndef WINDOWS
 	/* Handle Unix domain sockets separately */
