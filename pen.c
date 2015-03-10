@@ -2361,7 +2361,9 @@ static int open_listener(char *a)
 	char b[1024], *p;
 	int one = 1;
 	int optval = 1;
+#if 0
 	int port;
+#endif
 
 #ifndef WINDOWS
 	/* Handle Unix domain sockets separately */
