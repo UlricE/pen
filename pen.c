@@ -486,7 +486,7 @@ static int accept_nb(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
 	if (tcp_nodelay) tcp_nodelay_on(sockfd);
 }
 
-static struct sigaction alrmaction, hupaction, termaction, usr1action;
+static struct sigaction alrmaction, hupaction, termaction, usr1action, usr2action;
 
 void debug(char *fmt, ...)
 {
@@ -1396,6 +1396,11 @@ static void quit(int dummy)
 {
 	DEBUG(1, "Quitting\nRead configuration %d times", hupcounter);
 	loopflag = 0;
+}
+
+static void die(int dummy)
+{
+	abort();
 }
 
 /* Store client and return index */
@@ -3264,6 +3269,11 @@ static void setup_signals(void)
 	sigemptyset(&usr1action.sa_mask);
 	usr1action.sa_flags = 0;
 	sigaction(SIGUSR1, &usr1action, NULL);
+
+	usr2action.sa_handler = die;
+	sigemptyset(&usr2action.sa_mask);
+	usr2action.sa_flags = 0;
+	sigaction(SIGUSR2, &usr2action, NULL);
 
 	hupaction.sa_handler = restart_log;
 	sigemptyset(&hupaction.sa_mask);
