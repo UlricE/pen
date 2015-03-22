@@ -185,6 +185,8 @@ static time_t now;
 static int tcp_nodelay = 0;
 static int tcp_fastclose = 0;
 static int pending_list = -1;	/* pending connections */
+static int pending_queue = 0;	/* number of pending connections */
+static int pending_max = 100;	/* max number of pending connections */
 static int listen_queue = 100;
 static int multi_accept = 100;
 static int nservers;		/* number of servers */
@@ -2025,6 +2027,7 @@ static void close_conn(int i)
 	}
 	if (conns[i].state == CS_IN_PROGRESS) {
 		pending_list = dlist_remove(conns[i].pend);
+		pending_queue--;
 	}
 	conns[i].state = CS_UNUSED;
 	DEBUG(2, "close_conn: Closing connection %d to server %d; connections_used = %d\n" \
@@ -2283,6 +2286,7 @@ static int try_server(int index, int conn)
 		conns[conn].state = CS_IN_PROGRESS;
 		pending_list = dlist_insert(pending_list, conn);
 		conns[conn].pend = pending_list;
+		pending_queue++;
 		event_add(upfd, EVENT_WRITE);
 		DEBUG(2, "Pending connect to server %d\n" \
 			"conns[%d].client = %d\n" \
@@ -2293,6 +2297,7 @@ static int try_server(int index, int conn)
 			debug("Server %d failed, retry in %d sec: %d",
 				index, blacklist_time, socket_errno);
 		}
+		debug("blacklisting server %d because connect error %d", index, err);
 		blacklist_server(index);
 		close(upfd);
 		return 0;
@@ -2746,6 +2751,10 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		} else if (!strcmp(p, "weight")) {
 			weight = 0;
 		}
+	} else if (!strcmp(p, "pending_max")) {
+		p = strtok(NULL, " ");
+		if (p) pending_max = atoi(p);
+		if (pending_max <= 0) pending_max = 1;
 	} else if (!strcmp(p, "pid")) {
 		output(op, "%ld\n", (long)getpid());
 	} else if (!strcmp(p, "poll")) {
@@ -3324,6 +3333,7 @@ static void check_listen_socket(void)
 	/* process tcp connection(s) */
 		for (i = 0; i < multi_accept; i++) {
 			if (connections_used >= connections_max) break;
+			if (pending_queue >= pending_max) break;
 			downfd = accept_nb(listenfd,
 				(struct sockaddr *)&cli_addr, &clilen);
 			if (downfd < 0) {
@@ -3372,6 +3382,7 @@ static void check_if_connected(int i)
 	}
 	if (result != 0) {
 		debug("Connect failed: %s", strerror(result));
+		debug("blacklisting server %d because of connect failure");
 		blacklist_server(conns[i].server);
 		if (failover_server(i) == 0) {
 			//close_conn(i);
@@ -3381,6 +3392,7 @@ static void check_if_connected(int i)
 	DEBUG(2, "Connection %d completed", i);
 	if (conns[i].state == CS_IN_PROGRESS) {
 		pending_list = dlist_remove(conns[i].pend);
+		pending_queue--;
 	}
 	conns[i].state = CS_CONNECTED;
 	conns[i].t = now;
@@ -3402,6 +3414,7 @@ static void check_if_timeout(int i)
 		(int)now, i, i, conns[i].t, i, now-conns[i].t);
 	if (now-conns[i].t >= timeout) {
 		DEBUG(2, "Connection %d timed out", i);
+		debug("blacklisting server %d because of connect timeout");
 		blacklist_server(conns[i].server);
 		if (failover_server(i) == 0) {
 			//close_conn(i);

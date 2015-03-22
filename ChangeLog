@@ -1,4 +1,7 @@
 
+150322	New knob to tweak max number of pending nonblocking connection
+	attempts: pending_max N (default 100).
+
 150228	Moved dlist prototypes to dlist.h.
 
 150227	Added check to close idle connections after a period of inactivity.
