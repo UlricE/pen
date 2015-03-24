@@ -1,4 +1,6 @@
 
+150324	Updated penctl.1 with the new command.
+
 150322	New knob to tweak max number of pending nonblocking connection
 	attempts: pending_max N (default 100).
 
