@@ -1,4 +1,7 @@
 
+150325	New commands ssl_option and ssl_ciphers to individually disable
+	insecure protocols and ciphers.
+
 150324	Updated penctl.1 with the new command.
 
 150322	New knob to tweak max number of pending nonblocking connection

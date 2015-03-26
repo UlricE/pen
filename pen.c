@@ -66,6 +66,8 @@ static char *keyfile;
 static char *cacert_dir;
 static char *cacert_file;
 static SSL_CTX *ssl_context = NULL;
+static long ssl_options;
+static char *ssl_ciphers;
 #endif  /* HAVE_LIBSSL */
 
 #ifdef HAVE_LIBGEOIP
@@ -881,7 +883,7 @@ static RSA *ssl_temp_rsa_cb(SSL *ssl, int export, int keylength)
 
 static int ssl_init(void)
 {
-	int err;
+	int n, err;
 
 	SSL_load_error_strings();
 	SSLeay_add_ssl_algorithms();
@@ -907,8 +909,24 @@ static int ssl_init(void)
 		error("SSL: Error allocating context: %s",
 			ERR_error_string(err, NULL));
 	}
+	debug("this is a test");
+	debug("debuglevel = %d", debuglevel);
+	DEBUG(1, "this is also a test");
+	DEBUG(1, "ssl_options = %d", ssl_options);
+	if (ssl_options) {
+		SSL_CTX_set_options(ssl_context, ssl_options);
+	}
 	if (ssl_compat) {
 		SSL_CTX_set_options(ssl_context, SSL_OP_ALL);
+	}
+	DEBUG(1, "ssl_ciphers = '%s'", ssl_ciphers);
+	if (ssl_ciphers) {
+		n = SSL_CTX_set_cipher_list(ssl_context, ssl_ciphers);
+		if (n == 0) {
+			err = ERR_get_error();
+			debug("SSL_CTX_set_cipher_list(ssl_context, %s) returns %d (%s)",
+				ssl_ciphers, n, err);
+		}
 	}
 	if (certfile == NULL || *certfile == 0) {
 		debug("SSL: No cert file specified in config file!");
@@ -2836,6 +2854,26 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		} else {
 			output(op, "Unable to create webstats\n");
 		}
+#ifdef HAVE_LIBSSL
+	} else if (!strcmp(p, "ssl_ciphers")) {
+		p = strtok(NULL, " ");
+		if (ssl_ciphers) {
+			free(ssl_ciphers);
+			ssl_ciphers = NULL;
+		}
+		if (p) ssl_ciphers = pen_strdup(p);
+	} else if (!strcmp(p, "ssl_option")) {
+		p = strtok(NULL, " ");
+		if (!strcmp(p, "no_sslv2")) {
+			ssl_options |= SSL_OP_NO_SSLv2;
+		} else if (!strcmp(p, "no_sslv3")) {
+			ssl_options |= SSL_OP_NO_SSLv3;
+		} else if (!strcmp(p, "no_tlsv1")) {
+			ssl_options |= SSL_OP_NO_TLSv1;
+		} else if (!strcmp(p, "cipher_server_preference")) {
+			ssl_options |= SSL_OP_CIPHER_SERVER_PREFERENCE;
+		}
+#endif	/* HAVE_SSL */
 	} else if (!strcmp(p, "stubborn")) {
 		stubborn = 1;
 	} else if (!strcmp(p, "tcp_fastclose")) {
@@ -3827,10 +3865,13 @@ static int options(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
-	int i;
+	int i, n;
 	struct passwd *pwd = NULL;
 	struct rlimit r;
-	int n = options(argc, argv);
+
+	init_mask();
+
+	n = options(argc, argv);
 	argc -= n;
 	argv += n;
 
@@ -3838,6 +3879,9 @@ int main(int argc, char **argv)
 #ifdef WINDOWS
 	start_winsock();
 #endif
+
+	init(argc, argv);
+	read_cfg(cfgfile);
 
 	getrlimit(RLIMIT_CORE, &r);
 	r.rlim_cur = r.rlim_max;
@@ -3848,12 +3892,6 @@ int main(int argc, char **argv)
 #ifndef WINDOWS
 	if (!foreground) {
 		background();
-	}
-#endif
-
-#ifdef HAVE_LIBSSL
-	if (certfile) {
-		ssl_init();
 	}
 #endif
 
@@ -3875,8 +3913,12 @@ int main(int argc, char **argv)
 
 	snprintf(listenport, sizeof listenport, "%s", argv[0]);
 	listenfd = open_listener(listenport);
-	init_mask();
-	init(argc, argv);
+
+#ifdef HAVE_LIBSSL
+	if (certfile) {
+		ssl_init();
+	}
+#endif
 
 	/* we must look up user id before chrooting */
 	if (user) {
@@ -3899,7 +3941,9 @@ int main(int argc, char **argv)
 			error("Can't setuid(%d)", (int)pwd->pw_uid);
 	}
 
+#if 0
 	read_cfg(cfgfile);
+#endif
 	open_log(logfile);
 	if (pidfile) {
 		pidfp = fopen(pidfile, "w");

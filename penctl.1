@@ -200,6 +200,12 @@ List address, port, weight, priority and max number of simultaneous connections 
 \fIsocket N\fR
 Show to which connection socket N belongs.
 .TP
+\fIssl_ciphers CIPHERS\fR
+Choose list of available SSL ciphers, specified in the format described in https://www.openssl.org/docs/apps/ciphers.html.
+.TP
+\fIssl_option OPTION\fR
+Manipulate SSL options. The available options are no_sslv2, no_sslv3 and no_tlsv1. Use the command multiple times to specify additional options.
+.TP
 \fIstatus\fR
 Print status information in html format.
 .TP
