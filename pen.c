@@ -996,6 +996,13 @@ static int ssl_init(void)
 	SSL_CTX_set_session_cache_mode(ssl_context, 0);
 #endif
 
+#ifdef NID_X9_62_prime256v1
+	EC_KEY *ecdh = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
+	SSL_CTX_set_tmp_ecdh(ssl_context, ecdh);
+	EC_KEY_free(ecdh);
+	DEBUG(1, "ECDH Initialized with NIST P-256");
+#endif
+
 	return 0;
 }
 
