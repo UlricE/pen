@@ -1,7 +1,7 @@
 /*
    mergelogs.c
 
-   Copyright (C) 2001-2002  Ulric Eriksson <ulric@siag.nu>
+   Copyright (C) 2001-2015  Ulric Eriksson <ulric@siag.nu>
  
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by

@@ -1,6 +1,6 @@
 #!/bin/sh
 
-#  Copyright (C) 2002-2003  Ulric Eriksson <ulric@siag.nu>
+#  Copyright (C) 2002-2015  Ulric Eriksson <ulric@siag.nu>
 
 #  This program is free software; you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License as published by
