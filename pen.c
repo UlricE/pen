@@ -68,6 +68,7 @@ static char *cacert_file;
 static SSL_CTX *ssl_context = NULL;
 static long ssl_options;
 static char *ssl_ciphers;
+static int ssl_session_id_context = 1;
 #endif  /* HAVE_LIBSSL */
 
 #ifdef HAVE_LIBGEOIP
@@ -1009,6 +1010,9 @@ static int ssl_init(void)
 		EC_KEY_free(ecdh);
 	}
 #endif
+
+	SSL_CTX_set_session_id_context(ssl_context, (void *)&ssl_session_id_context,
+		sizeof ssl_session_id_context);
 
 	return 0;
 }
