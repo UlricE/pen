@@ -3434,7 +3434,7 @@ static void check_if_connected(int i)
 	}
 	if (result != 0) {
 		debug("Connect failed: %s", strerror(result));
-		debug("blacklisting server %d because of connect failure");
+		debug("blacklisting server %d because of connect failure", conns[i].server);
 		blacklist_server(conns[i].server);
 		if (failover_server(i) == 0) {
 			//close_conn(i);
@@ -3466,7 +3466,7 @@ static void check_if_timeout(int i)
 		(int)now, i, i, conns[i].t, i, now-conns[i].t);
 	if (now-conns[i].t >= timeout) {
 		DEBUG(2, "Connection %d timed out", i);
-		debug("blacklisting server %d because of connect timeout");
+		debug("blacklisting server %d because of connect timeout", conns[i].server);
 		blacklist_server(conns[i].server);
 		if (failover_server(i) == 0) {
 			//close_conn(i);
