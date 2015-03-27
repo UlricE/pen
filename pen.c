@@ -2050,6 +2050,8 @@ static void close_conn(int i)
 	}
 #ifdef HAVE_LIBSSL
 	if (conns[i].ssl) {
+		SSL_shutdown(conns[i].ssl);
+		SSL_shutdown(conns[i].ssl);
 		SSL_free(conns[i].ssl);
 		conns[i].ssl = 0;
 	}
