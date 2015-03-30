@@ -2033,6 +2033,23 @@ static void close_conn(int i)
 		close(conns[i].upfd);
 		fd2conn_set(conns[i].upfd, -1);
 	}
+#ifdef HAVE_LIBSSL
+	if (conns[i].ssl) {
+		int n = SSL_shutdown(conns[i].ssl);
+		DEBUG(3, "First SSL_shutdown(%d) returns %d", conns[i].ssl, n);
+		if (n == 0) {
+			n = SSL_shutdown(conns[i].ssl);
+			DEBUG(3, "Second SSL_shutdown(%d) returns %d", conns[i].ssl, n);
+		}
+		if (n == -1) {
+			n = SSL_get_error(conns[i].ssl, n);
+			DEBUG(3, "%s", ERR_error_string(SSL_get_error(conns[i].ssl, n), NULL));
+			ERR_print_errors_fp(stderr);
+		}
+		SSL_free(conns[i].ssl);
+		conns[i].ssl = 0;
+	}
+#endif
 	if (conns[i].downfd != -1 && conns[i].downfd != listenfd) {
 		event_delete(conns[i].downfd);
 		close(conns[i].downfd);
@@ -2048,14 +2065,6 @@ static void close_conn(int i)
 		free(conns[i].upb);
 		conns[i].upn=0;
 	}
-#ifdef HAVE_LIBSSL
-	if (conns[i].ssl) {
-		SSL_shutdown(conns[i].ssl);
-		SSL_shutdown(conns[i].ssl);
-		SSL_free(conns[i].ssl);
-		conns[i].ssl = 0;
-	}
-#endif
 	connections_used--;
 	DEBUG(2, "decrementing connections_used to %d for connection %d",
 		connections_used, i);
