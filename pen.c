@@ -2899,6 +2899,14 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 			ssl_options |= SSL_OP_NO_SSLv3;
 		} else if (!strcmp(p, "no_tlsv1")) {
 			ssl_options |= SSL_OP_NO_TLSv1;
+#ifdef SSL_OP_NO_TLSv1_1
+		} else if (!strcmp(p, "no_tlsv1.1")) {
+			ssl_options |= SSL_OP_NO_TLSv1_1;
+#endif
+#ifdef SSL_OP_NO_TLSv1_2
+		} else if (!strcmp(p, "no_tlsv1.2")) {
+			ssl_options |= SSL_OP_NO_TLSv1_2;
+#endif
 		} else if (!strcmp(p, "cipher_server_preference")) {
 			ssl_options |= SSL_OP_CIPHER_SERVER_PREFERENCE;
 		}
