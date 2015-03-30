@@ -88,7 +88,7 @@ GeoIP *geoip4, *geoip6;
 #define CLIENTS_MAX	2048	/* max clients */
 #define SERVERS_MAX	16	/* max servers */
 #define ACLS_MAX	10	/* max acls */
-#define CONNECTIONS_MAX	256	/* max simultaneous connections */
+#define CONNECTIONS_MAX	500	/* max simultaneous connections */
 #define TIMEOUT		3	/* default timeout for non reachable hosts */
 #define BLACKLIST_TIME	30	/* how long to shun a server that is down */
 #define TRACKING_TIME	0	/* how long a client is remembered */
@@ -190,7 +190,7 @@ static int tcp_fastclose = 0;
 static int pending_list = -1;	/* pending connections */
 static int pending_queue = 0;	/* number of pending connections */
 static int pending_max = 100;	/* max number of pending connections */
-static int listen_queue = 100;
+static int listen_queue = CONNECTIONS_MAX;
 static int multi_accept = 100;
 static int nservers;		/* number of servers */
 static int current;		/* current server */
