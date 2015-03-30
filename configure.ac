@@ -81,6 +81,10 @@ AS_IF([test "$with_ssl" != "no"],
 	AC_CHECK_LIB(crypto, main)
 	AC_CHECK_LIB(ssl, main))
 
+dnl Some people think the EC stuff is patented and needs to be stripped out
+AC_CHECK_FUNC(EC_KEY_new_by_curve_name,
+	AC_DEFINE([HAVE_EC_KEY], 1, [#undef HAVE_EC_KEY]))
+
 AC_ARG_WITH(geoip, AS_HELP_STRING([--with-geoip], [use libgeoip]))
 AS_IF([test "$with_geoip" != "no"],
 	AC_CHECK_LIB([GeoIP], [GeoIP_country_code_by_addr]))

@@ -997,7 +997,7 @@ static int ssl_init(void)
 	SSL_CTX_set_session_cache_mode(ssl_context, 0);
 #endif
 
-#ifdef NID_X9_62_prime256v1
+#if defined(HAVE_EC_KEY) && defined(NID_X9_62_prime256v1)
 	EC_KEY *ecdh = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
 	if (ecdh == NULL) {
 		debug("EC_KEY_new_by_curve_name failure");
