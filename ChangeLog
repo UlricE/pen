@@ -1,4 +1,9 @@
 
+150330	Added ssl_option no_tlsv1.1 and ssl_option no_tlsv1.2 to diable
+	SSL 1.1 and 1.2 respectively.
+
+150330	Released 0.27.3.
+
 150330	Added autoconf check that the ECDHE is available and not disabled.
 	Bumped default max connections and listen queue to 500.
 
