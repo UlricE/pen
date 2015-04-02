@@ -994,7 +994,7 @@ static int ssl_init(void)
 #if 1	/* testing */
 	debug("SSL_CTX_get_session_cache_mode() returns %d",
 		SSL_CTX_get_session_cache_mode(ssl_context));
-	SSL_CTX_set_session_cache_mode(ssl_context, 0);
+	SSL_CTX_set_session_cache_mode(ssl_context, SSL_SESS_CACHE_SERVER);
 #endif
 
 #if defined(HAVE_EC_KEY) && defined(NID_X9_62_prime256v1)
