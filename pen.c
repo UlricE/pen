@@ -913,7 +913,7 @@ static int ssl_init(void)
 	debug("this is a test");
 	debug("debuglevel = %d", debuglevel);
 	DEBUG(1, "this is also a test");
-	DEBUG(1, "ssl_options = %d", ssl_options);
+	DEBUG(1, "ssl_options = 0x%lx", ssl_options);
 	if (ssl_options) {
 		SSL_CTX_set_options(ssl_context, ssl_options);
 	}
