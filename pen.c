@@ -69,6 +69,7 @@ static SSL_CTX *ssl_context = NULL;
 static long ssl_options;
 static char *ssl_ciphers;
 static int ssl_session_id_context = 1;
+static int ssl_client_renegotiation_interval = 3600;	/* one hour, effectively disabled */
 #endif  /* HAVE_LIBSSL */
 
 #ifdef HAVE_LIBGEOIP
@@ -117,6 +118,7 @@ typedef struct {
 	int pend;		/* node in pending_list */
 #ifdef HAVE_LIBSSL
 	SSL *ssl;
+	time_t reneg;		/* last time client requested renegotiation */
 #endif
 } connection;
 
@@ -882,6 +884,56 @@ static RSA *ssl_temp_rsa_cb(SSL *ssl, int export, int keylength)
 	return rsa;
 }
 
+static void ssl_info_cb(const SSL *ssl, int where, int ret)
+{
+	int st = SSL_get_state(ssl);
+	const char *state = SSL_state_string_long(ssl);
+	const char *type = SSL_alert_type_string_long(ret);
+	const char *desc = SSL_alert_desc_string_long(ret);
+	connection *conn = SSL_get_app_data(ssl);
+	int renegotiating = 0;
+	DEBUG(3, "ssl_info_cb(ssl=%p, where=%d, ret=%d)", ssl, where, ret);
+	if (where & SSL_CB_LOOP) DEBUG(3, "\tSSL_CB_LOOP");
+	if (where & SSL_CB_EXIT) DEBUG(3, "\tSSL_CB_EXIT");
+	if (where & SSL_CB_READ) DEBUG(3, "\tSSL_CB_READ");
+	if (where & SSL_CB_WRITE) DEBUG(3, "\tSSL_CB_WRITE");
+	if (where & SSL_CB_ALERT) DEBUG(3, "\tSSL_CB_ALERT");
+	if (where & SSL_CB_READ_ALERT) DEBUG(3, "\tSSL_CB_READ_ALERT");
+	if (where & SSL_CB_WRITE_ALERT) DEBUG(3, "\tSSL_CB_WRITE_ALERT");
+	if (where & SSL_CB_ACCEPT_LOOP) DEBUG(3, "\tSSL_CB_ACCEPT_LOOP");
+	if (where & SSL_CB_ACCEPT_EXIT) DEBUG(3, "\tSSL_CB_ACCEPT_EXIT");
+	if (where & SSL_CB_CONNECT_LOOP) DEBUG(3, "\tSSL_CB_CONNECT_LOOP");
+	if (where & SSL_CB_CONNECT_EXIT) DEBUG(3, "\tSSL_CB_CONNECT_EXIT");
+	if (where & SSL_CB_HANDSHAKE_START) DEBUG(3, "\tSSL_CB_HANDSHAKE_START");
+	if (where & SSL_CB_HANDSHAKE_DONE) DEBUG(3, "\tSSL_CB_HANDSHAKE_DONE");
+	DEBUG(3, "SSL state = %s", state);
+	DEBUG(3, "Alert type = %s", type);
+	DEBUG(3, "Alert description = %s", desc);
+	if (st == SSL3_ST_SR_CLNT_HELLO_A) {
+		DEBUG(3, "\tSSL3_ST_SR_CLNT_HELLO_A");
+		renegotiating = 1;
+	} else if (st == SSL23_ST_SR_CLNT_HELLO_A) {
+		DEBUG(3, "\tSSL23_ST_SR_CLNT_HELLO_A");
+		renegotiating = 1;
+	}
+	if (conn == NULL) {
+		debug("Whoops, no conn info");
+	} else {
+		DEBUG(3, "Connection in state %d from client %d to server %d",
+			conn->state, conn->client, conn->server);
+		if (renegotiating) {
+			int reneg_time = now-conn->reneg;
+			conn->reneg = now;
+			debug("Client asks for renegotiation");
+			debug("Last time was %d seconds ago", reneg_time);
+			if (reneg_time < ssl_client_renegotiation_interval) {
+				debug("That's more often than we care for");
+				conn->state = CS_CLOSED;
+			}
+		}
+	}
+}
+
 static int ssl_init(void)
 {
 	int n, err;
@@ -975,6 +1027,7 @@ static int ssl_init(void)
 		}
 	}
 	SSL_CTX_set_tmp_rsa_callback(ssl_context, ssl_temp_rsa_cb);
+	SSL_CTX_set_info_callback(ssl_context, ssl_info_cb);
 	if (require_peer_cert) {
 		SSL_CTX_set_verify(ssl_context,
 			SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
@@ -2891,6 +2944,9 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 			ssl_ciphers = NULL;
 		}
 		if (p) ssl_ciphers = pen_strdup(p);
+	} else if (!strcmp(p, "ssl_client_renegotiation_interval")) {
+		p = strtok(NULL, " ");
+		ssl_client_renegotiation_interval = atoi(p);
 	} else if (!strcmp(p, "ssl_option")) {
 		p = strtok(NULL, " ");
 		if (!strcmp(p, "no_sslv2")) {
@@ -3201,6 +3257,8 @@ static void add_client(int downfd, struct sockaddr_storage *cli_addr)
 
 #ifdef HAVE_LIBSSL
 	conn = store_conn(downfd, ssl, client);
+	conns[conn].reneg = 0;	/* never */
+	SSL_set_app_data(ssl, &conns[conn]);
 #else
 	conn = store_conn(downfd, client);
 #endif
@@ -3603,6 +3661,10 @@ static int handle_events(int *pending_close)
                                 if (!try_flush_up(conn)) closing = 1;
                         }
                 }
+		if (conns[conn].state == CS_CLOSED) {
+			DEBUG(2, "Connection %d was closed", conn);
+			closing = 1;
+		}
 		if (closing) {
 			pending_close[npc++] = conn;
 		}
