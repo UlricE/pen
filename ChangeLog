@@ -7,7 +7,7 @@
 	In do_cmd: don't print "ignoring command" for comments starting
 	with '#'.
 
-150330	Added ssl_option no_tlsv1.1 and ssl_option no_tlsv1.2 to diable
+150330	Added ssl_option no_tlsv1.1 and ssl_option no_tlsv1.2 to disable
 	SSL 1.1 and 1.2 respectively.
 
 150330	Released 0.27.3.
