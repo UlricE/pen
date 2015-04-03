@@ -2958,7 +2958,8 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 			debug("write: no file");
 		}
 	} else {
-		output(op, "do_cmd: ignoring command starting with '%s'\n", p);
+		if (p[0] != '#')
+			output(op, "do_cmd: ignoring command starting with '%s'\n", p);
 	}
 }
 
