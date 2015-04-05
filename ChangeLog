@@ -1,4 +1,9 @@
 
+150406	OCSP stapling. New command ssl_ocsp_response filename
+	specifies the location of the ocsp response to be stapled.
+	The response must be pre-fetched. The idea was borrowed
+	from Rob Stradling.
+
 150403	New command ssl_client_renegotiation_interval specifies the
 	minimum number of seconds the client must wait between
 	renegotiation requests. Default 3600.

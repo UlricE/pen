@@ -929,8 +929,8 @@ static void ssl_info_cb(const SSL *ssl, int where, int ret)
 		if (renegotiating) {
 			int reneg_time = now-conn->reneg;
 			conn->reneg = now;
-			debug("Client asks for renegotiation");
-			debug("Last time was %d seconds ago", reneg_time);
+			DEBUG(3, "Client asks for renegotiation");
+			DEBUG(3, "Last time was %d seconds ago", reneg_time);
 			if (reneg_time < ssl_client_renegotiation_interval) {
 				debug("That's more often than we care for");
 				conn->state = CS_CLOSED;
@@ -952,17 +952,20 @@ static int ssl_stapling_cb(SSL *ssl, void *p)
 			conn->client, conn->server);
 	}
 	if (ocsp_resp_file) {
-		FILE *fp = fopen(ocsp_resp_file, "r");
+		int f = open(ocsp_resp_file, O_RDONLY);
 		DEBUG(3, "Read ocsp response from '%s'", ocsp_resp_file);
-		free(ocsp_resp_file);
-		ocsp_resp_file = NULL;
 		ocsp_resp_len = 0;
-		if (fp == NULL) {
+		if (f == -1) {
 			DEBUG(3, "Can't read file");
 		} else {
-			ocsp_resp_len = fread(ocsp_resp_data, OCSP_RESP_MAX, 1, fp);
-			fclose(fp);
+			debug("read(%d, %p, %d)", f, ocsp_resp_data, OCSP_RESP_MAX);
+			ocsp_resp_len = read(f, ocsp_resp_data, OCSP_RESP_MAX);
+			DEBUG(3, "Read %ld bytes of ocsp response",
+				ocsp_resp_len);
+			close(f);
 		}
+		free(ocsp_resp_file);
+		ocsp_resp_file = NULL;
 	}
 	if (ocsp_resp_len == 0) {
 		DEBUG(3, "No ocsp data");
@@ -1002,9 +1005,6 @@ static int ssl_init(void)
 		error("SSL: Error allocating context: %s",
 			ERR_error_string(err, NULL));
 	}
-	debug("this is a test");
-	debug("debuglevel = %d", debuglevel);
-	DEBUG(1, "this is also a test");
 	DEBUG(1, "ssl_options = 0x%lx", ssl_options);
 	if (ssl_options) {
 		SSL_CTX_set_options(ssl_context, ssl_options);
@@ -2992,8 +2992,8 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		p = strtok(NULL, " ");
 		if (ocsp_resp_file) {
 			free(ocsp_resp_file);
-			ocsp_resp_file = pen_strdup(p);
 		}
+		ocsp_resp_file = pen_strdup(p);
 	} else if (!strcmp(p, "ssl_option")) {
 		p = strtok(NULL, " ");
 		if (!strcmp(p, "no_sslv2")) {

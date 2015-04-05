@@ -206,6 +206,9 @@ Choose list of available SSL ciphers, specified in the format described in https
 \fIssl_client_renegotiation_interval S\fR
 Allowing the client to request renegotiation is a potential denial of service vector. This command specifies the minimum number of seconds the client has to wait between requests for renegotiation requests. Default 3600 = effectively disabled.
 .TP
+\fIssl_ocsp_response FILENAME\fR
+Specifies the location of a file containing a pre-fetched OCSP response. The file must be refreshed regularly by a cron job or similar and the ssl_ocsp_response command repeated to make Pen re-read the file..
+.TP
 \fIssl_option OPTION\fR
 Manipulate SSL options. The available options are no_sslv2, no_sslv3, no_tlsv1, no_tlsv1.1, no_tlsv1.2, cipher_server_preference. Use the command multiple times to specify multiple options.
 .TP
