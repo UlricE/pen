@@ -58,6 +58,8 @@
 #define SRV_SSL_V3 2
 #define SRV_SSL_TLS1 3
 
+#define OCSP_RESP_MAX 10000
+
 static char ssl_compat;
 static char require_peer_cert;
 static char ssl_protocol;
@@ -70,6 +72,9 @@ static long ssl_options;
 static char *ssl_ciphers;
 static int ssl_session_id_context = 1;
 static int ssl_client_renegotiation_interval = 3600;	/* one hour, effectively disabled */
+static unsigned char ocsp_resp_data[OCSP_RESP_MAX];
+static long ocsp_resp_len = 0;
+static char *ocsp_resp_file = NULL;
 #endif  /* HAVE_LIBSSL */
 
 #ifdef HAVE_LIBGEOIP
@@ -934,6 +939,41 @@ static void ssl_info_cb(const SSL *ssl, int where, int ret)
 	}
 }
 
+static int ssl_stapling_cb(SSL *ssl, void *p)
+{
+	connection *conn = SSL_get_app_data(ssl);
+	unsigned char *ocsp_resp_copy;
+
+	if (conn == NULL) {
+		debug("Whoops, no conn info");
+		return SSL_TLSEXT_ERR_ALERT_FATAL;
+	} else {
+		DEBUG(3, "ssl_stapling_cb() called for connection from client %d to server %d",
+			conn->client, conn->server);
+	}
+	if (ocsp_resp_file) {
+		FILE *fp = fopen(ocsp_resp_file, "r");
+		DEBUG(3, "Read ocsp response from '%s'", ocsp_resp_file);
+		free(ocsp_resp_file);
+		ocsp_resp_file = NULL;
+		ocsp_resp_len = 0;
+		if (fp == NULL) {
+			DEBUG(3, "Can't read file");
+		} else {
+			ocsp_resp_len = fread(ocsp_resp_data, OCSP_RESP_MAX, 1, fp);
+			fclose(fp);
+		}
+	}
+	if (ocsp_resp_len == 0) {
+		DEBUG(3, "No ocsp data");
+		return SSL_TLSEXT_ERR_NOACK;
+	}
+	ocsp_resp_copy = pen_malloc(ocsp_resp_len);
+	memcpy(ocsp_resp_copy, ocsp_resp_data, ocsp_resp_len);
+	SSL_set_tlsext_status_ocsp_resp(ssl, ocsp_resp_copy, ocsp_resp_len);
+	return SSL_TLSEXT_ERR_OK;
+}
+
 static int ssl_init(void)
 {
 	int n, err;
@@ -1028,6 +1068,7 @@ static int ssl_init(void)
 	}
 	SSL_CTX_set_tmp_rsa_callback(ssl_context, ssl_temp_rsa_cb);
 	SSL_CTX_set_info_callback(ssl_context, ssl_info_cb);
+	SSL_CTX_set_tlsext_status_cb(ssl_context, ssl_stapling_cb);
 	if (require_peer_cert) {
 		SSL_CTX_set_verify(ssl_context,
 			SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
@@ -2947,6 +2988,12 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 	} else if (!strcmp(p, "ssl_client_renegotiation_interval")) {
 		p = strtok(NULL, " ");
 		ssl_client_renegotiation_interval = atoi(p);
+	} else if (!strcmp(p, "ssl_ocsp_response")) {
+		p = strtok(NULL, " ");
+		if (ocsp_resp_file) {
+			free(ocsp_resp_file);
+			ocsp_resp_file = pen_strdup(p);
+		}
 	} else if (!strcmp(p, "ssl_option")) {
 		p = strtok(NULL, " ");
 		if (!strcmp(p, "no_sslv2")) {
