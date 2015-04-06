@@ -977,6 +977,15 @@ static int ssl_stapling_cb(SSL *ssl, void *p)
 	return SSL_TLSEXT_ERR_OK;
 }
 
+static int ssl_sni_cb(SSL *ssl, int *foo, void *arg)
+{
+	const char *n;
+
+	n = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+	debug("ssl_sni_cb() => name = '%s'", n);
+	return SSL_TLSEXT_ERR_NOACK;
+}
+
 static int ssl_init(void)
 {
 	int n, err;
@@ -1069,6 +1078,7 @@ static int ssl_init(void)
 	SSL_CTX_set_tmp_rsa_callback(ssl_context, ssl_temp_rsa_cb);
 	SSL_CTX_set_info_callback(ssl_context, ssl_info_cb);
 	SSL_CTX_set_tlsext_status_cb(ssl_context, ssl_stapling_cb);
+	SSL_CTX_set_tlsext_servername_callback(ssl_context, ssl_sni_cb);
 	if (require_peer_cert) {
 		SSL_CTX_set_verify(ssl_context,
 			SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
