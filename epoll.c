@@ -9,7 +9,7 @@
 static int efd;
 static struct epoll_event *epoll_ev;
 static int epoll_count, maxevents;
-static int index;
+static int pindex;
 
 static void epoll_event_ctl(int fd, int events, int op)
 {
@@ -53,7 +53,7 @@ static void epoll_event_delete(int fd)
 static void epoll_event_wait(void)
 {
 	DEBUG(2, "epoll_event_wait()");
-	index = -1;
+	pindex = -1;
         epoll_count = epoll_wait(efd, epoll_ev, maxevents, 1000*timeout);
 	DEBUG(2, "epoll_wait returns %d", epoll_count);
         if (epoll_count == -1 && errno != EINTR) {
@@ -66,13 +66,13 @@ static int epoll_event_fd(int *revents)
 {
         int events = 0;
 	DEBUG(2, "epoll_event_fd(revents=%p)", revents);
-	index++;
-        if (index >= epoll_count) return -1;
-	DEBUG(3, "\tepoll_ev[%d] = {revents=%d, data.fd=%d}", index, epoll_ev[index].events, epoll_ev[index].data.fd);
-        if (epoll_ev[index].events & EPOLLIN) events |= EVENT_READ;
-	if (epoll_ev[index].events & EPOLLOUT) events |= EVENT_WRITE;
+	pindex++;
+        if (pindex >= epoll_count) return -1;
+	DEBUG(3, "\tepoll_ev[%d] = {revents=%d, data.fd=%d}", pindex, epoll_ev[pindex].events, epoll_ev[pindex].data.fd);
+        if (epoll_ev[pindex].events & EPOLLIN) events |= EVENT_READ;
+	if (epoll_ev[pindex].events & EPOLLOUT) events |= EVENT_WRITE;
 	*revents = events;
-	return epoll_ev[index].data.fd;
+	return epoll_ev[pindex].data.fd;
 }
 
 void epoll_init(void)

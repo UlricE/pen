@@ -8,7 +8,7 @@
 
 struct pollfd *poll_ufds;
 static int poll_nfds, poll_count, poll_nfds_max;
-static int index;
+static int pindex;
 
 /* Making a sparse pollfd table, using fd as the index seems most efficient. */
 /* Need to make sure to grow the table as necessary. */
@@ -56,7 +56,7 @@ static void poll_event_delete(int fd)
 static void poll_event_wait(void)
 {
 	DEBUG(2, "poll_event_wait()");
-	index = -1;
+	pindex = -1;
         poll_count = poll(poll_ufds, poll_nfds, 1000*timeout);
 	DEBUG(2, "poll returns %d", poll_count);
         if (poll_count < 0 && errno != EINTR) {
@@ -69,13 +69,13 @@ static int poll_event_fd(int *revents)
 {
         int events = 0;
 	DEBUG(2, "poll_event_fd(revents=%p)", revents);
-	for (index++; index < poll_nfds; index++) {
-		DEBUG(3, "\tpoll_ufds[%d] = {fd=%d, revents=%d}", index, poll_ufds[index].fd, poll_ufds[index].revents);
-        	if (poll_ufds[index].revents & POLLIN) events |= EVENT_READ;
-        	if (poll_ufds[index].revents & POLLOUT) events |= EVENT_WRITE;
+	for (pindex++; pindex < poll_nfds; pindex++) {
+		DEBUG(3, "\tpoll_ufds[%d] = {fd=%d, revents=%d}", pindex, poll_ufds[pindex].fd, poll_ufds[pindex].revents);
+        	if (poll_ufds[pindex].revents & POLLIN) events |= EVENT_READ;
+        	if (poll_ufds[pindex].revents & POLLOUT) events |= EVENT_WRITE;
 		if (events) {
 			*revents = events;
-        		return poll_ufds[index].fd;
+        		return poll_ufds[pindex].fd;
 		}
 	}
 	return -1;
