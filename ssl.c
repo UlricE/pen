@@ -10,8 +10,6 @@
 #include "ssl.h"
 
 #ifdef HAVE_LIBSSL
-#include <openssl/ssl.h>
-#include <openssl/err.h>
 
 char ssl_compat;
 char require_peer_cert;
