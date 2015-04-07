@@ -261,7 +261,7 @@ static SSL_CTX *ssl_create_context(char *keyfile, char *certfile,
 		n = SSL_CTX_set_cipher_list(ssl_context, ssl_ciphers);
 		if (n == 0) {
 			err = ERR_get_error();
-			debug("SSL_CTX_set_cipher_list(ssl_context, %s) returns %d (%s)",
+			DEBUG(3, "SSL_CTX_set_cipher_list(ssl_context, %s) returns %d (%s)",
 				ssl_ciphers, n, err);
 		}
 	}
@@ -323,11 +323,9 @@ static SSL_CTX *ssl_create_context(char *keyfile, char *certfile,
 	/* permit large writes to be split up in several records */
 	SSL_CTX_set_mode(ssl_context, SSL_MODE_ENABLE_PARTIAL_WRITE);
 
-#if 1	/* testing */
-	debug("SSL_CTX_get_session_cache_mode() returns %d",
+	DEBUG(3, "SSL_CTX_get_session_cache_mode() returns %d",
 		SSL_CTX_get_session_cache_mode(ssl_context));
 	SSL_CTX_set_session_cache_mode(ssl_context, SSL_SESS_CACHE_SERVER);
-#endif
 
 #if defined(HAVE_EC_KEY) && defined(NID_X9_62_prime256v1)
 	EC_KEY *ecdh = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
