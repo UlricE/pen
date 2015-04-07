@@ -1,4 +1,11 @@
 
+150407	SSL code broken out into ssl.[ch]. SSL context creation broken
+	out from ssl_init to ssl_create_context.
+	Server Name Indication support. New command to enable:
+	ssl_sni_path PATH
+	where PATH is the name of a directory containing domain.key,
+	domain.crt and domain.ca files for each domain.
+
 150406	OCSP stapling. New command ssl_ocsp_response filename
 	specifies the location of the ocsp response to be stapled.
 	The response must be pre-fetched. The idea was borrowed

@@ -16,6 +16,7 @@ extern char *certfile;
 extern char *keyfile;
 extern char *cacert_dir;
 extern char *cacert_file;
+extern char *ssl_sni_path;
 extern SSL_CTX *ssl_context;
 extern long ssl_options;
 extern char *ssl_ciphers;

@@ -212,6 +212,9 @@ Specifies the location of a file containing a pre-fetched OCSP response. The fil
 \fIssl_option OPTION\fR
 Manipulate SSL options. The available options are no_sslv2, no_sslv3, no_tlsv1, no_tlsv1.1, no_tlsv1.2, cipher_server_preference. Use the command multiple times to specify multiple options.
 .TP
+\fIssl_sni_path PATH\fR
+This command enables the Server Name Indication TLS extension by specifying a directory where domain.key, domain.crt and domain.ca files can be found.
+.TP
 \fIstatus\fR
 Print status information in html format.
 .TP

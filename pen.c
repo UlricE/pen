@@ -508,7 +508,7 @@ void *pen_realloc(void *p, size_t n)
 	return q;
 }
 
-static char *pen_strdup(char *p)
+char *pen_strdup(const char *p)
 {
 	size_t len = strlen(p);
 	char *b = pen_malloc(len+1);
@@ -2674,7 +2674,9 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		ocsp_resp_file = pen_strdup(p);
 	} else if (!strcmp(p, "ssl_option")) {
 		p = strtok(NULL, " ");
-		if (!strcmp(p, "no_sslv2")) {
+		if (p == NULL) {
+			debug("Missing option");
+		} else if (!strcmp(p, "no_sslv2")) {
 			ssl_options |= SSL_OP_NO_SSLv2;
 		} else if (!strcmp(p, "no_sslv3")) {
 			ssl_options |= SSL_OP_NO_SSLv3;
@@ -2690,6 +2692,14 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 #endif
 		} else if (!strcmp(p, "cipher_server_preference")) {
 			ssl_options |= SSL_OP_CIPHER_SERVER_PREFERENCE;
+		}
+	} else if (!strcmp(p, "ssl_sni_path")) {
+		p = strtok(NULL, " ");
+		if (p == NULL) {
+			debug("Missing ssl_sni_path");
+		} else {
+			if (ssl_sni_path) free(ssl_sni_path);
+			ssl_sni_path = pen_strdup(p);
 		}
 #endif	/* HAVE_SSL */
 	} else if (!strcmp(p, "stubborn")) {

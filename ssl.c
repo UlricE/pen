@@ -18,6 +18,7 @@ char *certfile;
 char *keyfile;
 char *cacert_dir;
 char *cacert_file;
+char *ssl_sni_path;
 SSL_CTX *ssl_context = NULL;
 long ssl_options;
 char *ssl_ciphers;
@@ -161,21 +162,61 @@ static int ssl_stapling_cb(SSL *ssl, void *p)
 	return SSL_TLSEXT_ERR_OK;
 }
 
+static SSL_CTX *ssl_create_context(char *keyfile, char *certfile,
+		char *cacert_dir, char *cacert_file);
+
+static struct sni {
+	char *name;
+	SSL_CTX *ssl_context;
+	struct sni *next;
+} *sni_list;
+
 static int ssl_sni_cb(SSL *ssl, int *foo, void *arg)
 {
 	const char *n;
+	struct sni *s;
 
 	n = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
 	debug("ssl_sni_cb() => name = '%s'", n);
+	if (ssl_sni_path == NULL) {
+		DEBUG(3, "ssl_sni_path not set, giving up");
+		return SSL_TLSEXT_ERR_NOACK;
+	}
+	for (s = sni_list; s; s = s->next)
+		if (!strcmp(s->name, n)) break;
+	if (s == NULL) {
+		char keyfile[1024], certfile[1024], cacert_file[1024];
+		s = pen_malloc(sizeof *s);
+		s->name = pen_strdup(n);
+		s->next = sni_list;
+		sni_list = s;
+		snprintf(keyfile, sizeof keyfile, "%s/%s.key", ssl_sni_path, n);
+		snprintf(certfile, sizeof certfile, "%s/%s.crt", ssl_sni_path, n);
+		snprintf(cacert_file, sizeof cacert_file, "%s/%s.ca", ssl_sni_path, n);
+		s->ssl_context = ssl_create_context(keyfile, certfile, NULL, cacert_file);
+	}
+	if (s->ssl_context == NULL) return SSL_TLSEXT_ERR_NOACK;
 	return SSL_TLSEXT_ERR_NOACK;
 }
 
-int ssl_init(void)
+static SSL_CTX *ssl_create_context(char *keyfile, char *certfile,
+	char *cacert_dir, char *cacert_file)
 {
 	int n, err;
+	SSL_CTX *ssl_context;
 
-	SSL_load_error_strings();
-	SSLeay_add_ssl_algorithms();
+	if (certfile == NULL || *certfile == 0) {
+		debug("SSL: No cert file specified in config file!");
+		debug("The server MUST have a certificate!");
+		return NULL;
+	}
+	if (keyfile == NULL || *keyfile == 0)
+		keyfile = certfile;
+	if (cacert_dir != NULL && *cacert_dir == 0)
+		cacert_dir = NULL;
+	if (cacert_file != NULL && *cacert_file == 0)
+		cacert_file = NULL;
+
 	switch (ssl_protocol) {
 #if 0
 	case SRV_SSL_V2:
@@ -195,8 +236,9 @@ int ssl_init(void)
 	}
 	if (ssl_context == NULL) {
 		err = ERR_get_error();
-		error("SSL: Error allocating context: %s",
+		debug("SSL: Error allocating context: %s",
 			ERR_error_string(err, NULL));
+		return NULL;
 	}
 	DEBUG(1, "ssl_options = 0x%lx", ssl_options);
 	if (ssl_options) {
@@ -214,33 +256,26 @@ int ssl_init(void)
 				ssl_ciphers, n, err);
 		}
 	}
-	if (certfile == NULL || *certfile == 0) {
-		debug("SSL: No cert file specified in config file!");
-		error("The server MUST have a certificate!");
+
+	if (!SSL_CTX_use_certificate_file(ssl_context, certfile,
+					SSL_FILETYPE_PEM)) {
+		err = ERR_get_error();
+		debug("SSL: error reading certificate from file %s: %s",
+			certfile, ERR_error_string(err, NULL));
+		return NULL;
 	}
-	if (keyfile == NULL || *keyfile == 0)
-		keyfile = certfile;
-	if (certfile != NULL && *certfile != 0) {
-		if (!SSL_CTX_use_certificate_file(ssl_context, certfile,
-						SSL_FILETYPE_PEM)) {
-			err = ERR_get_error();
-			error("SSL: error reading certificate from file %s: %s",
-				certfile, ERR_error_string(err, NULL));
-		}
-		if (!SSL_CTX_use_PrivateKey_file(ssl_context, keyfile,
-						SSL_FILETYPE_PEM)) {
-			err = ERR_get_error();
-			error("SSL: error reading private key from file %s: %s",
-				keyfile, ERR_error_string(err, NULL));
-		}
-		if (!SSL_CTX_check_private_key(ssl_context)) {
-			error("SSL: Private key does not match public key in cert!");
-		}
+	if (!SSL_CTX_use_PrivateKey_file(ssl_context, keyfile,
+					SSL_FILETYPE_PEM)) {
+		err = ERR_get_error();
+		debug("SSL: error reading private key from file %s: %s",
+			keyfile, ERR_error_string(err, NULL));
+		return NULL;
 	}
-	if (cacert_dir != NULL && *cacert_dir == 0)
-		cacert_dir = NULL;
-	if (cacert_file != NULL && *cacert_file == 0)
-		cacert_file = NULL;
+	if (!SSL_CTX_check_private_key(ssl_context)) {
+		debug("SSL: Private key does not match public key in cert!");
+		return NULL;
+	}
+
 	if (cacert_dir != NULL || cacert_file != NULL) {
 		if (!SSL_CTX_load_verify_locations(ssl_context,
 					cacert_file, cacert_dir)) {
@@ -301,6 +336,18 @@ int ssl_init(void)
 
 	SSL_CTX_set_session_id_context(ssl_context, (void *)&ssl_session_id_context,
 		sizeof ssl_session_id_context);
+
+	return ssl_context;
+}
+
+int ssl_init(void)
+{
+	SSL_load_error_strings();
+	SSLeay_add_ssl_algorithms();
+	ssl_context = ssl_create_context(keyfile, certfile, cacert_dir, cacert_file);
+	if (ssl_context == NULL) {
+		error("Unable to create default context");
+	}
 
 	return 0;
 }
