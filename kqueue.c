@@ -12,7 +12,7 @@ static int kq;
 static struct kevent *kev, *kev_out;
 static int nfds, maxevents;
 static int count;
-static int index;
+static int pindex;
 
 #if 0
 static void kqueue_event_reset(void)
@@ -77,7 +77,7 @@ static void kqueue_event_wait(void)
                 perror("kevent");
                 error("Error on kevent");
         }
-	index = -1;
+	pindex = -1;
 	nfds = 0;
 }
 
@@ -85,13 +85,13 @@ static int kqueue_event_fd(int *revents)
 {
         int events = 0;
 	DEBUG(2, "kqueue_event_fd(revents=%p)", revents);
-        index++;
-        if (index >= count) return -1;
-	DEBUG(3, "\tkev_out[%d] = {filter=%d, ident=%d}", index, kev_out[index].filter, kev_out[index].ident);
-        if (kev_out[index].filter == EVFILT_READ) events |= EVENT_READ;
-        if (kev_out[index].filter == EVFILT_WRITE) events |= EVENT_WRITE;
+        pindex++;
+        if (pindex >= count) return -1;
+	DEBUG(3, "\tkev_out[%d] = {filter=%d, ident=%d}", pindex, kev_out[pindex].filter, kev_out[pindex].ident);
+        if (kev_out[pindex].filter == EVFILT_READ) events |= EVENT_READ;
+        if (kev_out[pindex].filter == EVFILT_WRITE) events |= EVENT_WRITE;
 	*revents = events;
-        return kev_out[index].ident;
+        return kev_out[pindex].ident;
 }
 
 void kqueue_init(void)
