@@ -196,7 +196,8 @@ static int ssl_sni_cb(SSL *ssl, int *foo, void *arg)
 		s->ssl_context = ssl_create_context(keyfile, certfile, NULL, cacert_file);
 	}
 	if (s->ssl_context == NULL) return SSL_TLSEXT_ERR_NOACK;
-	return SSL_TLSEXT_ERR_NOACK;
+	SSL_set_SSL_CTX(ssl, s->ssl_context);
+	return SSL_TLSEXT_ERR_OK;
 }
 
 static SSL_CTX *ssl_create_context(char *keyfile, char *certfile,
