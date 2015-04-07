@@ -85,5 +85,6 @@ extern void debug(char *, ...);
 extern void error(char *, ...);
 extern void *pen_malloc(size_t);
 extern void *pen_realloc(void *, size_t);
+extern char *pen_strdup(const char *);
 extern void mainloop(void);
 
