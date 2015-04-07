@@ -1,3 +1,5 @@
+#include <time.h>
+
 #ifdef DEBUGGING
 #define DEBUG(lvl, ...) \
 	if (debuglevel >= lvl) { \
