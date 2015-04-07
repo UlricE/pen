@@ -129,6 +129,10 @@ static int ssl_stapling_cb(SSL *ssl, void *p)
 	connection *conn = SSL_get_app_data(ssl);
 	unsigned char *ocsp_resp_copy;
 
+	if (SSL_get_SSL_CTX(ssl) != ssl_context) {
+		debug("stapling only works for default ctx");
+		return SSL_TLSEXT_ERR_NOACK;
+	}
 	if (conn == NULL) {
 		debug("Whoops, no conn info");
 		return SSL_TLSEXT_ERR_ALERT_FATAL;
@@ -177,7 +181,11 @@ static int ssl_sni_cb(SSL *ssl, int *foo, void *arg)
 	struct sni *s;
 
 	n = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
-	debug("ssl_sni_cb() => name = '%s'", n);
+	if (n == NULL) {
+		DEBUG(3, "SNI hostname null, giving up");
+		return SSL_TLSEXT_ERR_NOACK;
+	}
+	DEBUG(3, "ssl_sni_cb() => name = '%s'", n);
 	if (ssl_sni_path == NULL) {
 		DEBUG(3, "ssl_sni_path not set, giving up");
 		return SSL_TLSEXT_ERR_NOACK;
