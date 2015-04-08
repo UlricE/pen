@@ -1688,20 +1688,10 @@ static int copy_down(int i)
 
 #ifdef HAVE_LIBSSL
 		if (ssl) {
-			/* can't write more than 32000 bytes at a time */
-			int ssl_rc;
-			if (rc > 32000) ssl_rc = 32000;
-			else ssl_rc = rc;
-			n = SSL_write(ssl, b, ssl_rc);
-			DEBUG(2, "SSL_write returns %d", n);
-			if (n < 0) {
-				err = SSL_get_error(ssl, n);
-				if (debuglevel) debug("SSL error %d\n", err);
-				if (err == SSL_ERROR_WANT_READ ||
-				    err == SSL_ERROR_WANT_WRITE) {
-					return 0;
-				}
-			}
+			/* We can't SSL_write here, because the auto buffer we're using now
+			   won't be around if we need to retry the write.
+			   Therefore don't write anything here but let flush_down do it. */
+			n = 0;
 		} else {
 			n = my_send(to, b, rc, 0);
 			err = socket_errno;
@@ -3037,7 +3027,9 @@ static int flush_down(int i)
 	SSL *ssl = conns[i].ssl;
 
 	if (ssl) {
-		n = SSL_write(ssl, conns[i].downbptr, conns[i].downn);
+		int m = conns[i].downn;
+		if (m > 16000) m = 16000;
+		n = SSL_write(ssl, conns[i].downbptr, m);
 		DEBUG(2, "SSL_write returns %d\n", n);
 		if (n < 0) {
 			int err = SSL_get_error(ssl, n);

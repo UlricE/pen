@@ -1,4 +1,6 @@
 
+150408	Bug in copy_down affecting SSL connections fixed.
+
 150408	Updated ocsp stapling to be compatible with server name indication.
 	Added pen-ocsp.sh script.
 	Released 0.27.4.

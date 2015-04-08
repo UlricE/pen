@@ -359,7 +359,7 @@ static SSL_CTX *ssl_create_context(char *keyfile, char *certfile,
 			SSL_load_client_CA_file(certfile));
 
 	/* permit large writes to be split up in several records */
-	SSL_CTX_set_mode(ssl_context, SSL_MODE_ENABLE_PARTIAL_WRITE);
+	SSL_CTX_set_mode(ssl_context, SSL_MODE_ENABLE_PARTIAL_WRITE|SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
 
 	DEBUG(3, "SSL_CTX_get_session_cache_mode() returns %d",
 		SSL_CTX_get_session_cache_mode(ssl_context));
