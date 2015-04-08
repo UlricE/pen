@@ -124,15 +124,62 @@ static void ssl_info_cb(const SSL *ssl, int where, int ret)
 	}
 }
 
+static struct sni {
+	char *name;
+	SSL_CTX *ssl_context;
+	unsigned char ocsp_resp_data[OCSP_RESP_MAX];
+	int ocsp_resp_len;
+	time_t ocsp_resp_time;
+	struct sni *next;
+} *sni_list;
+
+static SSL_CTX *ssl_create_context(char *keyfile, char *certfile,
+		char *cacert_dir, char *cacert_file);
+
+static struct sni *lookup_sni(const char *name)
+{
+	struct sni *s;
+	for (s = sni_list; s; s = s->next)
+		if (!strcmp(s->name, name)) break;
+
+	if (s == NULL) {
+		char keyfile[1024], certfile[1024], cacert_file[1024];
+		s = pen_malloc(sizeof *s);
+		s->name = pen_strdup(name);
+		s->next = sni_list;
+		sni_list = s;
+		snprintf(keyfile, sizeof keyfile, "%s/%s.key", ssl_sni_path, name);
+		snprintf(certfile, sizeof certfile, "%s/%s.crt", ssl_sni_path, name);
+		snprintf(cacert_file, sizeof cacert_file, "%s/%s.ca", ssl_sni_path, name);
+		s->ocsp_resp_len = 0;
+		s->ocsp_resp_time = 0;	/* never */
+		s->ssl_context = ssl_create_context(keyfile, certfile, NULL, cacert_file);
+	}
+	return s;
+}
+
+static long read_ocsp(const char *fn, unsigned char *data)
+{
+	int f = open(fn, O_RDONLY);
+	long len = 0;
+	DEBUG(3, "Read ocsp response from '%s'", fn);
+	if (f == -1) {
+		DEBUG(3, "Can't read file");
+	} else {
+		len = read(f, data, OCSP_RESP_MAX);
+		DEBUG(3, "Read %ld bytes of ocsp response", len);
+		close(f);
+	}
+	if (len < 0) len = 0;
+	return len;
+}
+
 static int ssl_stapling_cb(SSL *ssl, void *p)
 {
 	connection *conn = SSL_get_app_data(ssl);
-	unsigned char *ocsp_resp_copy;
+	unsigned char *data, *ocsp_resp_copy;
+	long len = 0;
 
-	if (SSL_get_SSL_CTX(ssl) != ssl_context) {
-		debug("stapling only works for default ctx");
-		return SSL_TLSEXT_ERR_NOACK;
-	}
 	if (conn == NULL) {
 		debug("Whoops, no conn info");
 		return SSL_TLSEXT_ERR_ALERT_FATAL;
@@ -140,40 +187,43 @@ static int ssl_stapling_cb(SSL *ssl, void *p)
 		DEBUG(3, "ssl_stapling_cb() called for connection from client %d to server %d",
 			conn->client, conn->server);
 	}
-	if (ocsp_resp_file) {
-		int f = open(ocsp_resp_file, O_RDONLY);
-		DEBUG(3, "Read ocsp response from '%s'", ocsp_resp_file);
-		ocsp_resp_len = 0;
-		if (f == -1) {
-			DEBUG(3, "Can't read file");
-		} else {
-			debug("read(%d, %p, %d)", f, ocsp_resp_data, OCSP_RESP_MAX);
-			ocsp_resp_len = read(f, ocsp_resp_data, OCSP_RESP_MAX);
-			DEBUG(3, "Read %ld bytes of ocsp response",
-				ocsp_resp_len);
-			close(f);
+	if (SSL_get_SSL_CTX(ssl) != ssl_context) {
+		const char *n;
+		char ocsp_file[1024];
+		struct sni *s;
+		DEBUG(3, "stapling for sni context");
+		n = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+		if (n == NULL) {
+			DEBUG(3, "SNI hostname null, giving up");
+			return SSL_TLSEXT_ERR_NOACK;
 		}
-		free(ocsp_resp_file);
-		ocsp_resp_file = NULL;
+		s = lookup_sni(n);
+		if (now-s->ocsp_resp_time > 3600) {	/* seems about right */
+			snprintf(ocsp_file, sizeof ocsp_file, "%s/%s.ocsp", ssl_sni_path, n);
+			s->ocsp_resp_len = read_ocsp(ocsp_file, s->ocsp_resp_data);
+			s->ocsp_resp_time = now;
+		}
+		len = s->ocsp_resp_len;
+		data = s->ocsp_resp_data;
+	} else {
+		DEBUG(3, "stapling for default context");
+		if (ocsp_resp_file) {
+			ocsp_resp_len = read_ocsp(ocsp_resp_file, ocsp_resp_data);
+			free(ocsp_resp_file);
+			ocsp_resp_file = NULL;
+		}
+		len = ocsp_resp_len;
+		data = ocsp_resp_data;
 	}
-	if (ocsp_resp_len == 0) {
+	if (len == 0) {
 		DEBUG(3, "No ocsp data");
 		return SSL_TLSEXT_ERR_NOACK;
 	}
-	ocsp_resp_copy = pen_malloc(ocsp_resp_len);
-	memcpy(ocsp_resp_copy, ocsp_resp_data, ocsp_resp_len);
-	SSL_set_tlsext_status_ocsp_resp(ssl, ocsp_resp_copy, ocsp_resp_len);
+	ocsp_resp_copy = pen_malloc(len);
+	memcpy(ocsp_resp_copy, data, len);
+	SSL_set_tlsext_status_ocsp_resp(ssl, ocsp_resp_copy, len);
 	return SSL_TLSEXT_ERR_OK;
 }
-
-static SSL_CTX *ssl_create_context(char *keyfile, char *certfile,
-		char *cacert_dir, char *cacert_file);
-
-static struct sni {
-	char *name;
-	SSL_CTX *ssl_context;
-	struct sni *next;
-} *sni_list;
 
 static int ssl_sni_cb(SSL *ssl, int *foo, void *arg)
 {
@@ -190,19 +240,7 @@ static int ssl_sni_cb(SSL *ssl, int *foo, void *arg)
 		DEBUG(3, "ssl_sni_path not set, giving up");
 		return SSL_TLSEXT_ERR_NOACK;
 	}
-	for (s = sni_list; s; s = s->next)
-		if (!strcmp(s->name, n)) break;
-	if (s == NULL) {
-		char keyfile[1024], certfile[1024], cacert_file[1024];
-		s = pen_malloc(sizeof *s);
-		s->name = pen_strdup(n);
-		s->next = sni_list;
-		sni_list = s;
-		snprintf(keyfile, sizeof keyfile, "%s/%s.key", ssl_sni_path, n);
-		snprintf(certfile, sizeof certfile, "%s/%s.crt", ssl_sni_path, n);
-		snprintf(cacert_file, sizeof cacert_file, "%s/%s.ca", ssl_sni_path, n);
-		s->ssl_context = ssl_create_context(keyfile, certfile, NULL, cacert_file);
-	}
+	s = lookup_sni(n);
 	if (s->ssl_context == NULL) return SSL_TLSEXT_ERR_NOACK;
 	SSL_set_SSL_CTX(ssl, s->ssl_context);
 	return SSL_TLSEXT_ERR_OK;

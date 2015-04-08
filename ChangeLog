@@ -1,4 +1,8 @@
 
+150408	Updated ocsp stapling to be compatible with server name indication.
+	Added pen-ocsp.sh script.
+	Released 0.27.4.
+
 150407	SSL code broken out into ssl.[ch]. SSL context creation broken
 	out from ssl_init to ssl_create_context.
 	Server Name Indication support. New command to enable:
