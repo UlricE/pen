@@ -3,9 +3,30 @@
 # Run from cron like so:
 # 0 * * * * /usr/local/bin/pen-ocsp.sh >> /var/log/pen-ocsp.log 2>&1
 
+# Suggested file hierarchy:
+# /etc/pen	# General configuration files
+# /etc/pen/sni	# Private keys, certificates et al, including default certificate
+# /etc/pen/sni/example.com.key	# Private key for example.com
+# /etc/pen/sni/example.com.crt	# Certificate for example.com
+# /etc/pen/sni/example.com.ca	# CA's certificate for example.com
+# /etc/pen/sni/example.com.ocsp	# OCSP response file, auto-loaded by this script
+# /etc/pen/sni/example.net.key	# Private key for example.net
+# /etc/pen/sni/example.net.crt	# Certificate for example.net
+# /etc/pen/sni/example.net.ca	# CA's certificate for example.net
+# /etc/pen/sni/example.net.ocsp	# OCSP response file, auto-loaded by this script
+
+# Pen *requires* a default certificate in order to enable SSL. It is suggested that
+# this certificate is placed in /etc/pen/sni with the other certificates.
+
 CFG=/etc/pen
 SNI=$CFG/sni
 CTL=/var/run/pen/https.ctl
+
+# Sample domains, default domain first:
+DOMAINS="example.com example.net"
+
+# No changes should be necessary below this line.
+
 
 # get_ocsp cert cacert outfile
 get_ocsp()
@@ -15,32 +36,24 @@ get_ocsp()
 		echo "No OCSP URI found in cert"
 	else
 		host=`echo "$uri"|cut -f 3 -d /`
-		openssl ocsp -noverify -issuer "$2" -cert "$1" -url "$uri" -header Host "$host" -respout "$3"
+		openssl ocsp -noverify -issuer "$2" -cert "$1" -url "$uri" -header Host "$host" -respout "$3.tmp"
+		if test -s "$3.tmp"; then
+			mv "$3.tmp" "$3"
+		else
+			echo "No response for $1"
+		fi
 	fi
 }
 
-# get_ocsp_default cert cacert outfile
-get_ocsp_default()
-{
-	get_ocsp "$1" "$2" "$3"
-	# For the default ssl context, tell Pen to reload the ocsp response.
-	penctl "$CTL" "ssl_ocsp_response $3"
-}
+for d in $DOMAINS; do
+	get_ocsp $SNI/$d.crt $SNI/$d.ca $SNI/$d.ocsp
+done
 
-# get_ocsp_sni domain
-get_ocsp_sni()
-{
-	get_ocsp $SNI/$1.crt $SNI/$1.ca $SNI/$1.ocsp
-	# Pen will reload automatically
-}
-
-# Sample requests:
-
-# Get OCSP response for default context
-get_ocsp_default /etc/pen/mycert.pem /etc/pen/cacert.crt /etc/pen/mycert.ocsp
-
-# Get OCSP response for SNI context
-get_ocsp_sni www.example.com
-
-
+# Tell Pen to reload the ocsp response for the default ssl context.
+set $DOMAINS
+if test -s "$SNI/$1.ocsp"; then
+	penctl "$CTL" "ssl_ocsp_response" "$SNI/$1.ocsp"
+else
+	echo "No response for default domain $1"
+fi
 
