@@ -13,6 +13,9 @@
    */
 #undef HAVE_DIRENT_H
 
+/* #undef HAVE_EC_KEY */
+#undef HAVE_EC_KEY
+
 /* #undef HAVE_EPOLL */
 #undef HAVE_EPOLL
 
@@ -42,6 +45,9 @@
 
 /* Define to 1 if you have the `ssl' library (-lssl). */
 #undef HAVE_LIBSSL
+
+/* Define to 1 if you have the <linux/if_packet.h> header file. */
+#undef HAVE_LINUX_IF_PACKET_H
 
 /* Define to 1 if you have the <memory.h> header file. */
 #undef HAVE_MEMORY_H

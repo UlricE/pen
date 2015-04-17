@@ -1,4 +1,5 @@
 #include <time.h>
+#include <netinet/in.h>
 
 #ifdef DEBUGGING
 #define DEBUG(lvl, ...) \
@@ -50,6 +51,27 @@ extern int service_main(int, char **);
 #define CS_CLOSED	(CS_CLOSED_UP | CS_CLOSED_DOWN)
 
 typedef struct {
+	int status;		/* last failed connection attempt */
+	int acl;		/* which clients can use this server */
+	struct sockaddr_storage addr;
+	uint8_t hwaddr[6];
+	int c;			/* connections */
+	int weight;		/* default 1 */
+	int prio;
+	int maxc;		/* max connections, soft limit */
+	int hard;		/* max connections, hard limit */
+	unsigned long long sx, rx;	/* bytes sent, received */
+} server;
+
+typedef struct {
+	time_t last;		/* last time this client made a connection */
+	struct sockaddr_storage addr;
+	int server;		/* server used last time */
+	long connects;
+	long long csx, crx;
+} client;
+
+typedef struct {
 	int state;		/* as per above */
 	time_t t;		/* time of connection attempt */
 	int downfd, upfd;
@@ -67,6 +89,11 @@ typedef struct {
 #endif
 } connection;
 
+extern int multi_accept;
+extern int nservers;		/* number of servers */
+extern server *servers;
+
+extern int socket_nb(int, int, int);
 
 extern void (*event_add)(int, int);
 extern void (*event_arm)(int, int);
@@ -88,5 +115,10 @@ extern void error(char *, ...);
 extern void *pen_malloc(size_t);
 extern void *pen_realloc(void *, size_t);
 extern char *pen_strdup(const char *);
+extern int unused_server_slot(int);
+extern int server_is_blacklisted(int);
 extern void mainloop(void);
 
+extern int dsr_init(char *, char *);
+extern void dsr_frame(int);
+extern void dsr_arp(int);

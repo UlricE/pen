@@ -76,26 +76,6 @@ GeoIP *geoip4, *geoip6;
 #define WEIGHT_FACTOR	256	/* to make weight kick in earlier */
 
 typedef struct {
-	int status;		/* last failed connection attempt */
-	int acl;		/* which clients can use this server */
-	struct sockaddr_storage addr;
-	int c;			/* connections */
-	int weight;		/* default 1 */
-	int prio;
-	int maxc;		/* max connections, soft limit */
-	int hard;		/* max connections, hard limit */
-	unsigned long long sx, rx;	/* bytes sent, received */
-} server;
-
-typedef struct {
-	time_t last;		/* last time this client made a connection */
-	struct sockaddr_storage addr;
-	int server;		/* server used last time */
-	long connects;
-	long long csx, crx;
-} client;
-
-typedef struct {
 	unsigned int ip, mask;
 } ace_ipv4;
 
@@ -146,12 +126,12 @@ static int pending_list = -1;	/* pending connections */
 static int pending_queue = 0;	/* number of pending connections */
 static int pending_max = 100;	/* max number of pending connections */
 static int listen_queue = CONNECTIONS_MAX;
-static int multi_accept = 100;
-static int nservers;		/* number of servers */
+int multi_accept = 100;
+int nservers;
 static int current;		/* current server */
 static int nacls[ACLS_MAX];
 static client *clients;
-static server *servers;
+server *servers;
 static acl *acls[ACLS_MAX];
 static int emerg_server = -1;	/* server of last resort */
 static int emergency = 0;	/* are we using the emergency server? */
@@ -208,6 +188,8 @@ static char *proto = "tcp";
 
 static int fd2conn_max = 0;
 static int *fd2conn;
+
+static char *dsr_if, *dsr_ip;
 
 static unsigned char mask_ipv6[129][16];
 
@@ -413,7 +395,7 @@ static void tcp_nodelay_on(int s)
 }
 
 /* save a few syscalls for modern Linux and BSD */
-static int socket_nb(int domain, int type, int protocol)
+int socket_nb(int domain, int type, int protocol)
 {
 #ifdef SOCK_NONBLOCK
 	int s = socket(domain, type|SOCK_NONBLOCK, protocol);
@@ -1348,6 +1330,7 @@ static void setaddress(int server, char *s, int dp, char *proto)
 	if (pen_aton(address, &servers[server].addr) == 0) {
 		error("unknown or invalid address [%s]", address);
 	}
+	memset(servers[server].hwaddr, 0, 6);
 	pen_setport(&servers[server].addr, port);
 }
 
@@ -2458,6 +2441,18 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		p = strtok(NULL, " ");
 		if (p) debuglevel = atoi(p);
 		output(op, "%d\n", debuglevel);
+	} else if (!strcmp(p, "dsr_if")) {
+		p = strtok(NULL, " ");
+		if (p) {
+			free(dsr_if);
+			dsr_if = pen_strdup(p);
+		}
+	} else if (!strcmp(p, "dsr_ip")) {
+		p = strtok(NULL, " ");
+		if (p) {
+			free(dsr_ip);
+			dsr_ip = pen_strdup(p);
+		}
 	} else if (!strcmp(p, "dummy")) {
 		dummy = 1;
 	} else if (!strcmp(p, "epoll")) {
@@ -2805,7 +2800,7 @@ static void read_cfg(char *cf)
 	fclose(fp);
 }
 
-static int unused_server_slot(int i)
+int unused_server_slot(int i)
 {
 	struct sockaddr_storage *a = &servers[i].addr;
 	if (a->ss_family == AF_INET) {
@@ -2815,7 +2810,7 @@ static int unused_server_slot(int i)
 	return 0;
 }
 
-static int server_is_blacklisted(int i)
+int server_is_blacklisted(int i)
 {
 	return (now-servers[i].status < blacklist_time);
 }
@@ -3186,8 +3181,11 @@ static void check_listen_socket(void)
 	socklen_t clilen = sizeof cli_addr;
 	int i, downfd;
 	DEBUG(2, "check_listen_socket()");
-	/* special case for udp */
-	if (udp) {
+	if (dsr_if) {
+		/* special case for dsr */
+		dsr_frame(listenfd);
+	} else if (udp) {
+		/* special case for udp */
 		downfd = listenfd;
 		add_client(downfd, &cli_addr);
 	} else {
@@ -3212,7 +3210,6 @@ static void check_listen_socket(void)
 		DEBUG(2, "accepted %d connections", i);
 	}
 }
-
 
 static void check_control_socket(void)
 {
@@ -3498,6 +3495,7 @@ void mainloop(void)
 	DEBUG(2, "mainloop()");
         while (loopflag) {
                 check_signals();
+		if (dsr_if) dsr_arp(listenfd);
                 if (udp && (connections_used >= connections_max)) recycle_connection();
 		arm_listenfd();
                 event_wait();
@@ -3732,6 +3730,7 @@ int main(int argc, char **argv)
 		}
 	}
 
+
 	/* Balancing port */
 	if (udp) {
 		protoid = SOCK_DGRAM;
@@ -3739,7 +3738,15 @@ int main(int argc, char **argv)
 	}
 
 	snprintf(listenport, sizeof listenport, "%s", argv[0]);
-	listenfd = open_listener(listenport);
+	/* Direct server return */
+	if (dsr_if) {
+		listenfd = dsr_init(dsr_if, listenport);
+		if (listenfd == -1) {
+			error("Can't initialize direct server return");
+		}
+	} else {
+		listenfd = open_listener(listenport);
+	}
 
 #ifdef HAVE_LIBSSL
 	if (certfile) {
@@ -3768,9 +3775,6 @@ int main(int argc, char **argv)
 			error("Can't setuid(%d)", (int)pwd->pw_uid);
 	}
 
-#if 0
-	read_cfg(cfgfile);
-#endif
 	open_log(logfile);
 	if (pidfile) {
 		pidfp = fopen(pidfile, "w");

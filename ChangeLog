@@ -1,5 +1,8 @@
 
+150416	Added dsr.c
+
 150408	Bug in copy_down affecting SSL connections fixed.
+	Released 0.27.5.
 
 150408	Updated ocsp stapling to be compatible with server name indication.
 	Added pen-ocsp.sh script.
