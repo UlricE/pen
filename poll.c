@@ -4,11 +4,12 @@
 #include <errno.h>
 #include "pen.h"
 #include "diag.h"
+#include "event.h"
 #include "memory.h"
 #ifdef HAVE_POLL
 #include <poll.h>
 
-struct pollfd *poll_ufds;
+static struct pollfd *poll_ufds;
 static int poll_nfds, poll_count, poll_nfds_max;
 static int pindex;
 

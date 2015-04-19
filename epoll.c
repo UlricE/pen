@@ -4,6 +4,7 @@
 #include <errno.h>
 #include "pen.h"
 #include "diag.h"
+#include "event.h"
 #include "memory.h"
 #ifdef HAVE_EPOLL
 #include <sys/epoll.h>
