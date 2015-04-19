@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include "pen.h"
+#include "memory.h"
 
 /* circular doubly linked lists, used for pending and closing connections */
 

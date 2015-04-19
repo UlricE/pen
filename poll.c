@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <errno.h>
 #include "pen.h"
+#include "diag.h"
+#include "memory.h"
 #ifdef HAVE_POLL
 #include <poll.h>
 

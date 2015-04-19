@@ -8,6 +8,7 @@
 #include <sys/select.h>
 #endif
 #include "pen.h"
+#include "diag.h"
 
 static fd_set w_read, w_write;
 static fd_set w_r_copy, w_w_copy;

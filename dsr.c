@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include "pen.h"
+#include "diag.h"
 
 #ifdef HAVE_LINUX_IF_PACKET_H
 #include <stdlib.h>
@@ -146,6 +147,7 @@ int dsr_init(char *dsr_if, char *listenport)
 	ifindex = ifr.ifr_ifindex;
 	DEBUG(2, "Index = %d", ifindex);
 
+#if 0
 	/* make interface promiscuous */
 	if (ioctl(fd, SIOCGIFFLAGS, &ifr) == -1) {
 		perror("ioctl");
@@ -154,6 +156,7 @@ int dsr_init(char *dsr_if, char *listenport)
 	if (ioctl(fd, SIOCSIFFLAGS, &ifr) == -1) {
 		perror("ioctl");
 	}
+#endif
 
 	/* bind to interface */
 	memset(&sll, 0, sizeof sll);

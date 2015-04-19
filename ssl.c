@@ -7,6 +7,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include "pen.h"
+#include "diag.h"
+#include "memory.h"
 #include "ssl.h"
 
 #ifdef HAVE_LIBSSL

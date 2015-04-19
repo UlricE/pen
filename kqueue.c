@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include "pen.h"
+#include "diag.h"
 #ifdef HAVE_KQUEUE
 #include <sys/types.h>
 #include <sys/event.h>
