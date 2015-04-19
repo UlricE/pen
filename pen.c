@@ -57,46 +57,23 @@ GeoIP *geoip4, *geoip6;
 #endif
 
 #include "pen.h"
+#include "acl.h"
+#include "diag.h"
 #include "dlist.h"
-
-#define ACE_IPV4 (1)
-#define ACE_IPV6 (2)
-#define ACE_GEO (3)
+#include "dsr.h"
+#include "memory.h"
+#include "settings.h"
 
 #define BUFFER_MAX 	(32*1024)
 
 #define CLIENTS_MAX	2048	/* max clients */
 #define SERVERS_MAX	16	/* max servers */
-#define ACLS_MAX	10	/* max acls */
 #define CONNECTIONS_MAX	500	/* max simultaneous connections */
 #define TIMEOUT		3	/* default timeout for non reachable hosts */
 #define BLACKLIST_TIME	30	/* how long to shun a server that is down */
 #define TRACKING_TIME	0	/* how long a client is remembered */
 #define KEEP_MAX	100	/* how much to keep from the URI */
 #define WEIGHT_FACTOR	256	/* to make weight kick in earlier */
-
-typedef struct {
-	unsigned int ip, mask;
-} ace_ipv4;
-
-typedef struct {
-	struct in6_addr ip;
-	unsigned char len;
-} ace_ipv6;
-
-typedef struct {
-	char country[2];
-} ace_geo;
-
-typedef struct {
-	unsigned char class;
-	unsigned char permit;
-	union {
-		ace_ipv4 ipv4;
-		ace_ipv6 ipv6;
-		ace_geo geo;
-	} ace;
-} acl;
 
 void (*event_add)(int, int);
 void (*event_arm)(int, int);
@@ -116,7 +93,6 @@ void (*event_init)(void) = select_init;
 #define DUMMY_MSG "Ulric was here."
 
 static int idle_timeout = 0;	/* never time out */
-static int abort_on_error = 0;
 static int dummy = 0;		/* use pen as a test target */
 static int idlers = 0, idlers_wanted = 0;
 time_t now;
@@ -129,18 +105,14 @@ static int listen_queue = CONNECTIONS_MAX;
 int multi_accept = 100;
 int nservers;
 static int current;		/* current server */
-static int nacls[ACLS_MAX];
 static client *clients;
 server *servers;
-static acl *acls[ACLS_MAX];
 static int emerg_server = -1;	/* server of last resort */
 static int emergency = 0;	/* are we using the emergency server? */
 static int abuse_server = -1;	/* server for naughty clients */
 static connection *conns;
 
-int debuglevel;
 static int asciidump;
-static int foreground;
 static int loopflag;
 static int exit_enabled = 0;
 static int keepalive = 0;
@@ -191,8 +163,6 @@ static int *fd2conn;
 
 static char *dsr_if, *dsr_ip;
 
-static unsigned char mask_ipv6[129][16];
-
 static void close_conn(int);
 
 #ifdef WINDOWS
@@ -205,28 +175,6 @@ static void close_conn(int);
 
 #define CONNECT_IN_PROGRESS (WSAEWOULDBLOCK)
 #define WOULD_BLOCK(err) (err == WSAEWOULDBLOCK)
-
-static FILE *syslogfp;
-
-static void openlog(const char *ident, int option, int facility)
-{
-	syslogfp = fopen("syslog.txt", "a");
-}
-
-static void syslog(int priority, const char *format, ...)
-{
-	va_list ap;
-	va_start(ap, format);
-	if (syslogfp) {
-		vfprintf(syslogfp, format, ap);
-	}
-	va_end(ap);
-}
-
-static void closelog(void)
-{
-	fclose(syslogfp);
-}
 
 #define SIGHUP	0
 #define SIGUSR1	0
@@ -430,75 +378,6 @@ static int accept_nb(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
 
 static struct sigaction alrmaction, hupaction, termaction, usr1action, usr2action;
 
-void debug(char *fmt, ...)
-{
-	time_t now;
-	struct tm *nowtm;
-	char nowstr[80];
-	char b[4096];
-	va_list ap;
-	va_start(ap, fmt);
-	vsnprintf(b, sizeof b, fmt, ap);
-	now=time(NULL);
-	nowtm = localtime(&now);
-	strftime(nowstr, sizeof(nowstr), "%Y-%m-%d %H:%M:%S", nowtm);
-	if (foreground) {
-		fprintf(stderr, "%s: %s\n", nowstr, b);
-	} else {
-		openlog("pen", LOG_CONS, LOG_USER);
-		syslog(LOG_DEBUG, "%s\n", b);
-		closelog();
-	}
-	va_end(ap);
-}
-
-void error(char *fmt, ...)
-{
-	char b[4096];
-	va_list ap;
-	va_start(ap, fmt);
-	vsnprintf(b, sizeof b, fmt, ap);
-	fprintf(stderr, "%s\n", b);
-	if (!foreground) {
-		openlog("pen", LOG_CONS, LOG_USER);
-		syslog(LOG_ERR, "%s\n", b);
-		closelog();
-	}
-	va_end(ap);
-	if (abort_on_error) abort();
-	else exit(EXIT_FAILURE);
-}
-
-void *pen_malloc(size_t n)
-{
-	void *q = malloc(n);
-	if (!q) error("Can't malloc %ld bytes", (long)n);
-	return q;
-}
-
-static void *pen_calloc(size_t n, size_t s)
-{
-	void *q = calloc(n, s);
-	if (!q) error("Can't calloc %ld bytes", (long)n*s);
-	return q;
-}
-
-void *pen_realloc(void *p, size_t n)
-{
-	void *q = realloc(p, n);
-	if (!q) error("Can't realloc %ld bytes", (long)n);
-	return q;
-}
-
-char *pen_strdup(const char *p)
-{
-	size_t len = strlen(p);
-	char *b = pen_malloc(len+1);
-	memcpy(b, p, len);
-	b[len] = '\0';
-	return b;
-}
-
 static int pen_strncasecmp(const char *p, const char *q, size_t n)
 {
 	size_t i = 0;
@@ -544,25 +423,6 @@ static int fd2conn_get(int fd)
 {
 	if (fd < 0 || fd >= fd2conn_max) return -1;
 	return fd2conn[fd];
-}
-
-static void init_mask(void)
-{
-	unsigned char m6[16];
-	int i, j;
-
-	memset(m6, 0, sizeof m6);
-	for (i = 0; i < 129; i++) {
-		for (j = 15; j >= 0; j--) {
-			mask_ipv6[i][j] = m6[j];
-			m6[j] >>= 1;
-			if (j > 0) {
-				m6[j] |= (m6[j-1] << 7);
-			} else {
-				m6[j] |= (1 << 7);
-			}
-		}
-	}
 }
 
 static int pen_hash(struct sockaddr_storage *a)
@@ -772,211 +632,6 @@ static int pen_aton(char *name, struct sockaddr_storage *addr)
 	return result;
 }
 
-
-/* allocate ace and fill in the generics */
-static int add_acl(int a, unsigned char permit)
-{
-	int i;
-	if (a < 0 || a >= ACLS_MAX) {
-		debug("add_acl: %d outside (0,%d)", a, ACLS_MAX);
-		return -1;
-	}
-	i = nacls[a]++;
-	acls[a] = pen_realloc(acls[a], nacls[a]*sizeof(acl));
-	acls[a][i].permit = permit;
-	return i;
-}
-
-static void add_acl_ipv4(int a, unsigned int ip, unsigned int mask, unsigned char permit)
-{
-	int i = add_acl(a, permit);
-
-	if (i == -1) return;
-
-	DEBUG(2, "add_acl_ipv4(%d, %x, %x, %d)", a, ip, mask, permit);
-	acls[a][i].class = ACE_IPV4;
-	acls[a][i].ace.ipv4.ip = ip;
-	acls[a][i].ace.ipv4.mask = mask;
-}
-
-static void add_acl_ipv6(int a, unsigned char *ipaddr, unsigned char len, unsigned char permit)
-{
-	int i = add_acl(a, permit);
-
-	if (i == -1) return;
-
-	DEBUG(2, "add_acl_ipv6(%d, %x, %d, %d)\n" \
-		"%x:%x:%x:%x:%x:%x:%x:%x/%d", \
-		a, ipaddr, len, permit, \
-		256*ipaddr[0]+ipaddr[1], 256*ipaddr[2]+ipaddr[3], 256*ipaddr[4]+ipaddr[5], 256*ipaddr[6]+ipaddr[7], \
-		256*ipaddr[8]+ipaddr[9], 256*ipaddr[10]+ipaddr[11], 256*ipaddr[12]+ipaddr[13], 256*ipaddr[14]+ipaddr[15],  len);
-	acls[a][i].class = ACE_IPV6;
-	memcpy(acls[a][i].ace.ipv6.ip.s6_addr, ipaddr, 16);
-	acls[a][i].ace.ipv6.len = len;
-}
-
-static void add_acl_geo(int a, char *country, unsigned char permit)
-{
-	int i = add_acl(a, permit);
-
-	if (i == -1) return;
-
-	DEBUG(2, "add_acl_geo(%d, %s, %d", a, country, permit);
-	acls[a][i].class = ACE_GEO;
-	strncpy(acls[a][i].ace.geo.country, country, 2);
-}
-
-static void del_acl(int a)
-{
-	DEBUG(2, "del_acl(%d)", a);
-	if (a < 0 || a >= ACLS_MAX) {
-		debug("del_acl: %d outside (0,%d)", a, ACLS_MAX);
-		return;
-	}
-	free(acls[a]);
-	acls[a] = NULL;
-	nacls[a] = 0;
-}
-
-#ifndef WINDOWS
-static int match_acl_unix(int a, struct sockaddr_un *cli_addr)
-{
-	DEBUG(2, "Unix acl:s not implemented");
-	return 1;
-}
-#endif
-
-static int match_acl_ipv4(int a, struct sockaddr_in *cli_addr)
-{
-	unsigned int client = cli_addr->sin_addr.s_addr;
-	int i;
-	int permit = 0;
-	acl *ap = acls[a];
-#ifdef HAVE_LIBGEOIP
-	const char *country = NULL;
-	int geo_done = 0;
-#endif
-	DEBUG(2, "match_acl_ipv4(%d, %u)", a, client);
-	for (i = 0; i < nacls[a]; i++) {
-		permit = ap[i].permit;
-		switch (ap[i].class) {
-		case ACE_IPV4:
-			if ((client & ap[i].ace.ipv4.mask) == ap[i].ace.ipv4.ip) {
-				return permit;
-			}
-			break;
-		case ACE_GEO:
-#ifdef HAVE_LIBGEOIP
-			if (geoip4 == NULL) break;
-			if (!geo_done) {
-				country = GeoIP_country_code_by_addr(geoip4,
-						pen_ntoa((struct sockaddr_storage *)cli_addr));
-				DEBUG(2, "Country = %s", country?country:"unknown");
-				geo_done = 1;
-			}
-			if (country && !strncmp(country,
-						ap[i].ace.geo.country, 2)) {
-				return permit;
-			}
-#else
-			debug("ACE_GEO: Not implemented");
-#endif
-			break;
-		default:
-			/* ignore other ACE classes (ipv6 et al) */
-			break;
-		}
-	}
-	return !permit;
-}
-
-/* The most straightforward way to get at the bytes of an ipv6 address
-   is to take the pointer to the in6_addr and cast it to a pointer to
-   unsigned char.
-*/
-static int match_acl_ipv6(int a, struct sockaddr_in6 *cli_addr)
-{
-	unsigned char *client = (unsigned char *)&(cli_addr->sin6_addr);
-	unsigned char *ip;
-	unsigned char *mask;
-	int len;
-	int i, j;
-	int permit = 0;
-	acl *ap = acls[a];
-#ifdef HAVE_LIBGEOIP
-	const char *country = NULL;
-	int geo_done = 0;
-#endif
-
-	DEBUG(2, "match_acl_ipv6(%d, %u)", a, client);
-	for (i = 0; i < nacls[a]; i++) {
-		permit = ap[i].permit;
-		switch (ap[i].class) {
-		case ACE_IPV6:
-			len = ap[i].ace.ipv6.len;
-			ip = (unsigned char *)&(ap[i].ace.ipv6.ip);
-			mask = mask_ipv6[len];
-
-			DEBUG(2, "Matching %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x against %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x / %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x", \
-				client[0], client[1], client[2], client[3], \
-				client[4], client[5], client[6], client[7], \
-				client[8], client[9], client[10], client[11], \
-				client[12], client[13], client[14], client[15], \
-				ip[0], ip[1], ip[2], ip[3], \
-				ip[4], ip[5], ip[6], ip[7], \
-				ip[8], ip[9], ip[10], ip[11], \
-				ip[12], ip[13], ip[14], ip[15], \
-				mask[0], mask[1], mask[2], mask[3], \
-				mask[4], mask[5], mask[6], mask[7], \
-				mask[8], mask[9], mask[10], mask[11], \
-				mask[12], mask[13], mask[14], mask[15]);
-
-			for (j = 0; j < 16; j++) {
-				if ((client[j] & mask[j]) != ip[j]) break;
-			}
-			if (j == 16) return permit;
-			break;
-		case ACE_GEO:
-#ifdef HAVE_LIBGEOIP
-			if (geoip6 == NULL) break;
-			if (!geo_done) {
-				country = GeoIP_country_code_by_addr_v6(geoip6,
-						pen_ntoa((struct sockaddr_storage *)cli_addr));
-				DEBUG(2, "Country = %s", country?country:"unknown");
-				geo_done = 1;
-			}
-			if (country && !strncmp(country,
-						ap[i].ace.geo.country, 2)) {
-				return permit;
-			}
-#else
-			debug("ACE_GEO: Not implemented");
-#endif
-			break;
-		default:
-			/* ignore other ACE classes (ipv4 et al) */
-			break;
-		}
-	}
-	return !permit;
-}
-
-static int match_acl(int a, struct sockaddr_storage *cli_addr)
-{
-	switch (cli_addr->ss_family) {
-#ifndef WINDOWS
-	case AF_UNIX:
-		return match_acl_unix(a, (struct sockaddr_un *)cli_addr);
-#endif
-	case AF_INET:
-		return match_acl_ipv4(a, (struct sockaddr_in *)cli_addr);
-	case AF_INET6:
-		return match_acl_ipv6(a, (struct sockaddr_in6 *)cli_addr);
-	default:
-		debug("match_acl: unknown address family %d", cli_addr->ss_family);
-	}
-	return 0;
-}
 
 static int webstats(void)
 {
@@ -2216,9 +1871,7 @@ static void read_cfg(char *);
 
 static void write_cfg(char *p)
 {
-	int i, j;
-	struct in_addr ip;
-	char ip_str[INET6_ADDRSTRLEN];
+	int i;
 	struct tm *nowtm;
 	char nowstr[80];
 	FILE *fp = fopen(p, "w");
@@ -2245,36 +1898,7 @@ static void write_cfg(char *p)
 	if (connections_max != CONNECTIONS_MAX)
 		fprintf(fp, " -x %d", connections_max);
 	fprintf(fp, " -F '%s' -C %s %s\n", p, ctrlport, listenport);
-	for (i = 0; i < ACLS_MAX; i++) {
-		fprintf(fp, "no acl %d\n", i);
-		for (j = 0; j < nacls[i]; j++) {
-			fprintf(fp, "acl %d %s ", i,
-				acls[i][j].permit?"permit":"deny");
-			switch (acls[i][j].class) {
-			case ACE_IPV4:
-				memcpy(&ip, &acls[i][j].ace.ipv4.ip, 4);
-				fprintf(fp, "%s ", inet_ntoa(ip));
-				memcpy(&ip, &acls[i][j].ace.ipv4.mask, 4);
-				fprintf(fp, "%s\n", inet_ntoa(ip));
-				break;
-			case ACE_IPV6:
-				fprintf(fp, "%s/%d\n",
-					inet_ntop(AF_INET6,
-						&acls[i][j].ace.ipv6.ip,
-						ip_str, sizeof ip_str),
-					acls[i][j].ace.ipv6.len);
-				break;
-			case ACE_GEO:
-				fprintf(fp, "country %c%c\n",
-					acls[i][j].ace.geo.country[0],
-					acls[i][j].ace.geo.country[1]);
-				break;
-			default:
-				debug("Unknown ACE class %d (this is probably a bug)",
-					acls[i][j].class);
-			}
-		}
-	}
+	save_acls(fp);
 	if (asciidump) fprintf(fp, "ascii\n");
 	else fprintf(fp, "no ascii\n");
 	fprintf(fp, "blacklist %d\n", blacklist_time);
