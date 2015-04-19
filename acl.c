@@ -1,12 +1,19 @@
+#include "config.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#ifdef HAVE_LIBGEOIP
+#include <GeoIP.h>
+GeoIP *geoip4, *geoip6;
+#endif
+
 #include "acl.h"
 #include "diag.h"
 #include "memory.h"
+#include "netconv.h"
 
 #define ACE_IPV4 (1)
 #define ACE_IPV6 (2)
@@ -16,7 +23,7 @@ static int nacls[ACLS_MAX];
 static acl *acls[ACLS_MAX];
 static unsigned char mask_ipv6[129][16];
 
-void init_mask(void)
+static void init_mask(void)
 {
 	unsigned char m6[16];
 	int i, j;
@@ -275,4 +282,15 @@ void save_acls(FILE *fp)
 			}
 		}
 	}
+}
+
+void acl_init(void)
+{
+	init_mask();
+	#ifdef HAVE_LIBGEOIP
+	geoip4 = GeoIP_open_type(GEOIP_COUNTRY_EDITION, GEOIP_MEMORY_CACHE);
+	if (geoip4 == NULL) debug("Could not initialize GeoIP for IPv4");
+	geoip6 = GeoIP_open_type(GEOIP_COUNTRY_EDITION_V6, GEOIP_MEMORY_CACHE);
+	if (geoip6 == NULL) debug("Could not initialize GeoIP for IPv6");
+#endif
 }

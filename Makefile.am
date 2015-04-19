@@ -1,8 +1,8 @@
 
 bin_PROGRAMS = pen mergelogs penctl penlog penlogd
-noinst_HEADERS = pen.h dlist.h ssl.h dsr.h memory.h diag.h settings.h acl.h event.h pen_select.h pen_poll.h pen_kqueue.h pen_epoll.h
+noinst_HEADERS = pen.h dlist.h ssl.h dsr.h memory.h diag.h settings.h acl.h event.h pen_select.h pen_poll.h pen_kqueue.h pen_epoll.h netconv.h
 
-pen_SOURCES = pen.c select.c poll.c kqueue.c epoll.c dlist.c ssl.c dsr.c memory.c diag.c settings.c acl.c event.c
+pen_SOURCES = pen.c select.c poll.c kqueue.c epoll.c dlist.c ssl.c dsr.c memory.c diag.c settings.c acl.c event.c netconv.c
 mergelogs_SOURCES = mergelogs.c
 penctl_SOURCES = penctl.c
 penlog_SOURCES = penlog.c
