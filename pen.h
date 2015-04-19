@@ -1,26 +1,6 @@
 #include <time.h>
 #include <netinet/in.h>
 
-#ifdef DEBUGGING
-#define DEBUG(lvl, ...) \
-	if (debuglevel >= lvl) { \
-		debug(__VA_ARGS__); \
-	}
-#define DEBUG_ERRNO(lvl, ...) \
-	if (debuglevel >= lvl) { \
-		err = socket_errno; \
-		debug(__VA_ARGS__); \
-	}
-#define SPAM \
-	if (debuglevel >= 2) \
-		debug("File %s, line %d, function %s", \
-			__FILE__, __LINE__, __func__);
-#else
-#define DEBUG(lvl, ...)
-#define DEBUG_ERRNO(lvl, ...)
-#define SPAM
-#endif
-
 #define EVENT_READ              (0x10000)
 #define EVENT_WRITE             (0x20000)
 
@@ -109,16 +89,7 @@ extern void select_init(void);
 extern void poll_init(void);
 extern void kqueue_init(void);
 extern void epoll_init(void);
-extern int debuglevel;
-extern void debug(char *, ...);
-extern void error(char *, ...);
-extern void *pen_malloc(size_t);
-extern void *pen_realloc(void *, size_t);
-extern char *pen_strdup(const char *);
 extern int unused_server_slot(int);
 extern int server_is_blacklisted(int);
 extern void mainloop(void);
 
-extern int dsr_init(char *, char *);
-extern void dsr_frame(int);
-extern void dsr_arp(int);
