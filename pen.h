@@ -1,9 +1,6 @@
 #include <time.h>
 #include <netinet/in.h>
 
-#define EVENT_READ              (0x10000)
-#define EVENT_WRITE             (0x20000)
-
 #ifdef WINDOWS
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -75,20 +72,9 @@ extern server *servers;
 
 extern int socket_nb(int, int, int);
 
-extern void (*event_add)(int, int);
-extern void (*event_arm)(int, int);
-extern void (*event_delete)(int);
-extern void (*event_wait)(void);
-extern int (*event_fd)(int *);
-
-extern int timeout;
 extern int connections_max;
 extern time_t now;
 
-extern void select_init(void);
-extern void poll_init(void);
-extern void kqueue_init(void);
-extern void epoll_init(void);
 extern int unused_server_slot(int);
 extern int server_is_blacklisted(int);
 extern void mainloop(void);

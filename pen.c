@@ -61,7 +61,12 @@ GeoIP *geoip4, *geoip6;
 #include "diag.h"
 #include "dlist.h"
 #include "dsr.h"
+#include "event.h"
 #include "memory.h"
+#include "pen_epoll.h"
+#include "pen_kqueue.h"
+#include "pen_poll.h"
+#include "pen_select.h"
 #include "settings.h"
 
 #define BUFFER_MAX 	(32*1024)
@@ -69,26 +74,10 @@ GeoIP *geoip4, *geoip6;
 #define CLIENTS_MAX	2048	/* max clients */
 #define SERVERS_MAX	16	/* max servers */
 #define CONNECTIONS_MAX	500	/* max simultaneous connections */
-#define TIMEOUT		3	/* default timeout for non reachable hosts */
 #define BLACKLIST_TIME	30	/* how long to shun a server that is down */
 #define TRACKING_TIME	0	/* how long a client is remembered */
 #define KEEP_MAX	100	/* how much to keep from the URI */
 #define WEIGHT_FACTOR	256	/* to make weight kick in earlier */
-
-void (*event_add)(int, int);
-void (*event_arm)(int, int);
-void (*event_delete)(int);
-void (*event_wait)(void);
-int (*event_fd)(int *);
-#if defined HAVE_KQUEUE
-void (*event_init)(void) = kqueue_init;
-#elif defined HAVE_EPOLL
-void (*event_init)(void) = epoll_init;
-#elif defined HAVE_POLL
-void (*event_init)(void) = poll_init;
-#else
-void (*event_init)(void) = select_init;
-#endif
 
 #define DUMMY_MSG "Ulric was here."
 
@@ -123,7 +112,6 @@ static int servers_max = SERVERS_MAX;
 int connections_max = CONNECTIONS_MAX;
 static int connections_used = 0;
 static int connections_last = 0;
-int timeout = TIMEOUT;
 static int blacklist_time = BLACKLIST_TIME;
 static int tracking_time = TRACKING_TIME;
 static int roundrobin = 0;
