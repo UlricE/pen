@@ -23,11 +23,10 @@ typedef struct {
 	} ace;
 } acl;
 
-extern void init_mask(void);
 extern void add_acl_ipv4(int, unsigned int, unsigned int, unsigned char);
 extern void add_acl_ipv6(int, unsigned char *, unsigned char, unsigned char);
 extern void add_acl_geo(int, char *, unsigned char);
 extern void del_acl(int);
 extern int match_acl(int, struct sockaddr_storage *);
 extern void save_acls(FILE *fp);
-
+extern void acl_init(void);
