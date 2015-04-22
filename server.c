@@ -34,15 +34,7 @@ static int emergency = 0;	/* are we using the emergency server? */
 int abuse_server = -1;	/* server for naughty clients */
 int servers_max = SERVERS_MAX;
 int blacklist_time = BLACKLIST_TIME;
-#if 0
-static int roundrobin = 0;
-static int weight = 0;
-static int prio = 0;
-static int hash = 0;
-static int stubborn = 0;
-#else
 int server_alg;
-#endif
 char *e_server = NULL;
 char *a_server = NULL;
 
@@ -123,7 +115,7 @@ int server_is_blacklisted(int i)
 	return (now-servers[i].status < blacklist_time);
 }
 
-static int server_is_unavailable(int i)
+int server_is_unavailable(int i)
 {
 	return unused_server_slot(i) || server_is_blacklisted(i);
 }

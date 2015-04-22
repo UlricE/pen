@@ -41,6 +41,7 @@ extern void setaddress(int, char *, int, char *);
 extern void blacklist_server(int);
 extern int unused_server_slot(int);
 extern int server_is_blacklisted(int);
+extern int server_is_unavailable(int);
 extern int server_by_roundrobin(void);
 extern int initial_server(int);
 extern int failover_server(int);
