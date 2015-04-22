@@ -254,27 +254,90 @@ static int real_hw_known(int server)
 
 static uint16_t hash_index[HASH_INDEX_SIZE];
 
-static void rebuild_hash_index(void)
+static int rebuild_hash_index(void)
 {
-	int i;
+	int i, j;
+	int t;			/* number of slots to fill */
+	int s[SERVERS_MAX];	/* how many slots should each server occupy */
+	int ls;			/* number of live, available servers */
+	int tw;			/* total weights of all available servers */
+	int w;
 
-	for (i = 0; i < HASH_INDEX_SIZE; i++) {
-		hash_index[i] = 0;
+	DEBUG(3, "rebuild_hash_index()");
+	/* first count how many servers we have */
+	ls = 0;
+	tw = 0;
+	for (i = 0; i < nservers; i++) {
+		if (server_is_unavailable(i)) {
+			s[i] = -1;
+		} else {
+			if (servers[i].weight > 0) {
+				s[i] = servers[i].weight;
+			} else {
+				s[i] = 1;
+			}
+			tw += s[i];
+			ls++;
+		}
 	}
+	DEBUG(3, "%d servers with total weight %d", ls, tw);
+	if (tw == 0) {
+		debug("No available servers, can't rebuild");
+		return 0;	/* without setting ALG_HASH_VALID */
+	}
+
+	t = HASH_INDEX_SIZE;
+	for (i = 0; i < nservers; i++) {
+		if (s[i] == -1) continue;
+		w = t*s[i]/tw;
+		t -= w;
+		tw -= s[i];
+		s[i] = w;
+		DEBUG(3, "Server %d gets %d slots; %d weight and %d slots remaining", i, w, tw, t);
+	}
+
+	t = HASH_INDEX_SIZE;
+	j = 0;
+	for (i = 0; t; i = (i+3) % HASH_INDEX_SIZE) {
+		while (s[j] <= 0) j++;
+		hash_index[i] = j;
+		s[j]--;
+		t--;
+	}
+
+#if 1
+for (i = 0; i < HASH_INDEX_SIZE; i++) {
+printf("%d ", hash_index[i]);
+}
+printf("\n");
+#endif
+
+	/* finally claim that the hash index is up to date */
 	server_alg |= ALG_HASH_VALID;
+	return 1;
 }
 
-static int hash(struct in_addr *a)
+static int hash(struct in_addr *a, uint16_t port)
 {
 	uint8_t *p = (uint8_t *)&a->s_addr;
-	return p[0]^p[1]^p[2]^p[3];
+	int h = p[0]^p[1]^p[2]^p[3];
+	if (server_alg & ALG_ROUNDROBIN) {
+		p = (uint8_t *)&port;
+		h = h^p[0]^p[1];
+	}
+	return h;
 }
 
-static int select_server(struct in_addr *a)
+static int select_server(struct in_addr *a, uint16_t port)
 {
-	int h = hash(a);
-	if ((server_alg & ALG_HASH_VALID) == 0) rebuild_hash_index();
-	return hash_index[h];	/* because we don't know better */
+	int h = hash(a, port);
+	int i;
+	if ((server_alg & ALG_HASH_VALID) == 0) {
+		if (!rebuild_hash_index()) return -1;	/* failure */
+	}
+	i = hash_index[h];
+	DEBUG(3, "select_server returning server %d for hash %d", i, h);
+	return i;
 }
 
 static void ipv4_frame(int fd, int n)
@@ -296,16 +359,20 @@ static void ipv4_frame(int fd, int n)
 	if ((ipv4_protocol == 6) &&
 	    (*(uint32_t *)ipv4_dst_p == (uint32_t)our_ip_addr.s_addr)) {
 		DEBUG(2, "We should forward this.");
-		server = select_server(ipv4_src_p);
-		if (!real_hw_known(server)) {
-			DEBUG(2, "Real hw addr unknown");
-			return;
-		}
 		tcp_segment = payload+ipv4_ihl;
 		tcp_src_port_p = tcp_segment;
 		tcp_dst_port_p = tcp_segment+2;
 		tcp_src_port = htons(*tcp_src_port_p);
 		tcp_dst_port = htons(*tcp_dst_port_p);
+		server = select_server(ipv4_src_p, tcp_src_port);
+		if (server == -1) {
+			debug("Dropping frame, nowhere to put it");
+			return;
+		}
+		if (!real_hw_known(server)) {
+			DEBUG(2, "Real hw addr unknown");
+			return;
+		}
 		DEBUG(2, "Source port = %d, destination port = %d",
 			tcp_src_port, tcp_dst_port);
 		if (port == 0 || tcp_dst_port == port) {
