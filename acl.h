@@ -23,6 +23,8 @@ typedef struct {
 	} ace;
 } acl;
 
+extern int client_acl, control_acl;
+
 extern void add_acl_ipv4(int, unsigned int, unsigned int, unsigned char);
 extern void add_acl_ipv6(int, unsigned char *, unsigned char, unsigned char);
 extern void add_acl_geo(int, char *, unsigned char);

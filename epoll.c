@@ -2,7 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
-#include "pen.h"
+//#include "pen.h"
+#include "conn.h"
 #include "diag.h"
 #include "event.h"
 #include "memory.h"

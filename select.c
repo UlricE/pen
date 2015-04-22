@@ -7,7 +7,8 @@
 /* because windows doesn't have it */
 #include <sys/select.h>
 #endif
-#include "pen.h"
+//#include "pen.h"
+#include "conn.h"
 #include "diag.h"
 #include "event.h"
 

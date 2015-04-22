@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include <stdlib.h>
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -8,6 +9,17 @@
 #include <arpa/inet.h>
 #include <sys/un.h>
 #include "diag.h"
+
+/* return port number in host byte order */
+int getport(char *p, char *proto)
+{
+	struct servent *s = getservbyname(p, proto);
+	if (s == NULL) {
+		return atoi(p);
+	} else {
+		return ntohs(s->s_port);
+	}
+}
 
 /* Takes a struct sockaddr_storage and returns the port number in host order.
    For a Unix socket, the port number is 1.
@@ -28,6 +40,29 @@ int pen_getport(struct sockaddr_storage *a)
 		return ntohs(si6->sin6_port);
 	default:
 		debug("pen_getport: Unknown address family %d", a->ss_family);
+	}
+	return 0;
+}
+
+int pen_setport(struct sockaddr_storage *a, int port)
+{
+	struct sockaddr_in *si;
+	struct sockaddr_in6 *si6;
+
+	switch (a->ss_family) {
+	case AF_UNIX:
+		/* No port for Unix domain sockets */
+		return 1;
+	case AF_INET:
+		si = (struct sockaddr_in *)a;
+		si->sin_port = htons(port);
+		return 1;
+	case AF_INET6:
+		si6 = (struct sockaddr_in6 *)a;
+		si6->sin6_port = htons(port);
+		return 1;
+	default:
+		debug("pen_setport: Unknown address family %d", a->ss_family);
 	}
 	return 0;
 }

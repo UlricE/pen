@@ -1,5 +1,95 @@
 #include "pen.h"
 
+static int sigaction(int signum, const struct sigaction *act,
+		struct sigaction *oldact)
+{
+	return 0;
+}
+
+static int sigemptyset(sigset_t *set)
+{
+	return 0;
+}
+
+static int getrlimit(int resource, struct rlimit *rlim)
+{
+	return 0;
+}
+
+static int setrlimit(int resource, const struct rlimit *rlim)
+{
+	return 0;
+}
+
+static uid_t getuid(void)
+{
+	return 0;
+}
+
+static struct passwd *getpwnam(const char *name)
+{
+	static struct passwd p;
+	p.pw_uid = 0;
+	p.pw_gid = 0;
+	return &p;
+}
+
+static int chroot(const char *path)
+{
+	return 0;
+}
+
+static int setgid(gid_t gid)
+{
+	return 0;
+}
+
+static int setuid(uid_t uid)
+{
+	return 0;
+}
+
+int inet_aton(const char *cp, struct in_addr *addr)
+{
+	addr->s_addr = inet_addr(cp);
+	return (addr->s_addr == INADDR_NONE) ? 0 : 1;
+}
+
+static void make_nonblocking(int fd)
+{
+	int i;
+	u_long mode = 1;
+	if ((i = ioctlsocket(fd, FIONBIO, &mode)) != NO_ERROR)
+		error("Can't ioctlsocket, error = %d", i);
+}
+
+static WSADATA wsaData;
+static int ws_started = 0;
+
+static int start_winsock(void)
+{
+	int n;
+	DEBUG(1, "start_winsock()");
+	if (!ws_started) {
+		n = WSAStartup(MAKEWORD(2, 2), &wsaData);
+		if (n != NO_ERROR) {
+			error("Error at WSAStartup() [%d]", WSAGetLastError());
+		} else {
+			DEBUG(2, "Winsock started");
+			ws_started = 1;
+		}
+	}
+	return ws_started;
+}
+
+static void stop_winsock(void)
+{
+	WSACleanup();
+	ws_started = 0;
+}
+
+
+
 static SERVICE_STATUS          ServiceStatus; 
 static SERVICE_STATUS_HANDLE   ServiceStatusHandle; 
 

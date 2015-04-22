@@ -4,6 +4,8 @@
 #include <errno.h>
 #include "pen.h"
 #include "diag.h"
+#include "server.h"
+#include "settings.h"
 
 #ifdef HAVE_LINUX_IF_PACKET_H
 #include <stdlib.h>
@@ -147,17 +149,6 @@ int dsr_init(char *dsr_if, char *listenport)
 	ifindex = ifr.ifr_ifindex;
 	DEBUG(2, "Index = %d", ifindex);
 
-#if 0
-	/* make interface promiscuous */
-	if (ioctl(fd, SIOCGIFFLAGS, &ifr) == -1) {
-		perror("ioctl");
-	}
-	ifr.ifr_flags |= IFF_PROMISC;
-	if (ioctl(fd, SIOCSIFFLAGS, &ifr) == -1) {
-		perror("ioctl");
-	}
-#endif
-
 	/* bind to interface */
 	memset(&sll, 0, sizeof sll);
 	sll.sll_family = AF_PACKET;
@@ -188,6 +179,9 @@ void send_arp_request(int fd, struct in_addr *a)
 	hexdump(buf, 42);
 	n = sendto(fd, buf, 42, 0, NULL, 0);
 	DEBUG(2, "Sent %d bytes arp request", n);
+	if (n == -1) {
+		perror("sendto");
+	}
 }
 
 static void store_hwaddr(struct in_addr *ip, uint8_t *hw)
@@ -240,6 +234,9 @@ static void arp_frame(int fd, int n)
 		memcpy(arp_spa_p, &our_ip_addr, 4);
 		n = sendto(fd, buf, n, 0, NULL, 0);
 		DEBUG(2, "Sent %d bytes", n);
+		if (n == -1) {
+			perror("sendto");
+		}
 	} else if ((arp_htype == 1) &&
 		   (arp_ptype == 0x0800) &&
 		   (arp_oper == 2)) {
@@ -253,9 +250,31 @@ static int real_hw_known(int server)
 	return (memcmp(servers[server].hwaddr, zero, 6) != 0);
 }
 
+#define HASH_INDEX_SIZE 256
+
+static uint16_t hash_index[HASH_INDEX_SIZE];
+
+static void rebuild_hash_index(void)
+{
+	int i;
+
+	for (i = 0; i < HASH_INDEX_SIZE; i++) {
+		hash_index[i] = 0;
+	}
+	server_alg |= ALG_HASH_VALID;
+}
+
+static int hash(struct in_addr *a)
+{
+	uint8_t *p = (uint8_t *)&a->s_addr;
+	return p[0]^p[1]^p[2]^p[3];
+}
+
 static int select_server(struct in_addr *a)
 {
-	return 0;	/* because we don't know better */
+	int h = hash(a);
+	if ((server_alg & ALG_HASH_VALID) == 0) rebuild_hash_index();
+	return hash_index[h];	/* because we don't know better */
 }
 
 static void ipv4_frame(int fd, int n)
@@ -275,7 +294,7 @@ static void ipv4_frame(int fd, int n)
 	DEBUG(2, "Sender IPv4 address: %s", inet_ntoa(*ipv4_src_p));
 	DEBUG(2, "Destination IPv4 address: %s", inet_ntoa(*ipv4_dst_p));
 	if ((ipv4_protocol == 6) &&
-	    (memcmp(ipv4_dst_p, &our_ip_addr, 4) == 0)) {
+	    (*(uint32_t *)ipv4_dst_p == (uint32_t)our_ip_addr.s_addr)) {
 		DEBUG(2, "We should forward this.");
 		server = select_server(ipv4_src_p);
 		if (!real_hw_known(server)) {
@@ -293,6 +312,9 @@ static void ipv4_frame(int fd, int n)
 			memcpy(mac_dst_p, servers[server].hwaddr, 6);
 			n = sendto(fd, buf, n, 0, NULL, 0);
 			DEBUG(2, "Sent %d bytes", n);
+			if (n == -1) {
+				perror("sendto");
+			}
 		}
 	}
 }
@@ -328,15 +350,7 @@ void dsr_arp(int fd)
 void dsr_frame(int fd)
 {
 	int i, type, n;
-#if 0
-	static time_t last_arp;
 
-	since = now-last_arp;
-	if ((real_hw_known == 0 && since > 0) || since >= 60) {
-		send_arp_request(fd, &real_ip_addr);
-		last_arp = now;
-	}
-#endif
 	for (i = 0; i < multi_accept; i++) {
 		n = recvfrom(fd, buf, MAXBUF, 0, NULL, NULL);
 		DEBUG(2, "Received %d bytes", n);
@@ -359,63 +373,6 @@ void dsr_frame(int fd)
 	}
 }
 
-#if 0
-static int mainloop(int fd)
-{
-	time_t now, last_arp;
-	int n;
-
-	last_arp = 0;
-	real_hw_known = 0;
-
-	while (1) {
-		int since;
-
-		now = time(NULL);
-		since = now-last_arp;
-		if ((real_hw_known == 0 && since > 0) || since >= 60) {
-			send_arp_request(fd, &real_ip_addr);
-			last_arp = now;
-		}
-		n = recvfrom(fd, buf, MAXBUF, 0, NULL, NULL);
-		DEBUG(2, "Received %d bytes", n);
-		if (n == -1) return 0;
-		dsr_frame(fd, n);
-	}
-	return 1;
-}
-
-int main(int argc, char **argv)
-{
-	int fd;
-
- 	if (argc < 5) {
-		printf("Usage: %s ifname ourip realip port\n", argv[0]);
-		return EXIT_FAILURE;
- 	}
-
-	if (inet_aton(argv[3], &real_ip_addr) == 0) {
-		printf("Real address %s is not valid\n", argv[3]);
-		return EXIT_FAILURE;
-	}
-
-	port = atoi(argv[4]);
-	if (port) printf("Forwarding port %d to %s\n", port, inet_ntoa(real_ip_addr));
-	else printf("Forwarding all ports to %s\n", inet_ntoa(real_ip_addr));
-
-	fd = dsr_init(argv[1], argv[2]);
-	if (fd == -1) {
-		printf("dsr_init failure, exiting\n");
-		return EXIT_FAILURE;
-	}
-
-	mainloop(fd);
-
- 	close(fd);
-
- 	return EXIT_SUCCESS;
-}
-#endif
 #else
 int dsr_init(char *dsr_if, char *dsr_ip)
 {

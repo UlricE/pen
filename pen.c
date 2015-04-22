@@ -53,75 +53,43 @@
 
 #include "pen.h"
 #include "acl.h"
+#include "client.h"
+#include "conn.h"
 #include "diag.h"
 #include "dlist.h"
 #include "dsr.h"
 #include "event.h"
+#include "idlers.h"
 #include "memory.h"
 #include "netconv.h"
 #include "pen_epoll.h"
 #include "pen_kqueue.h"
 #include "pen_poll.h"
 #include "pen_select.h"
+#include "server.h"
 #include "settings.h"
+#include "windows.h"
 
 #define BUFFER_MAX 	(32*1024)
 
-#define CLIENTS_MAX	2048	/* max clients */
-#define SERVERS_MAX	16	/* max servers */
-#define CONNECTIONS_MAX	500	/* max simultaneous connections */
-#define BLACKLIST_TIME	30	/* how long to shun a server that is down */
-#define TRACKING_TIME	0	/* how long a client is remembered */
 #define KEEP_MAX	100	/* how much to keep from the URI */
-#define WEIGHT_FACTOR	256	/* to make weight kick in earlier */
 
 #define DUMMY_MSG "Ulric was here."
 
-static int idle_timeout = 0;	/* never time out */
 static int dummy = 0;		/* use pen as a test target */
-static int idlers = 0, idlers_wanted = 0;
 time_t now;
 static int tcp_nodelay = 0;
-static int tcp_fastclose = 0;
-static int pending_list = -1;	/* pending connections */
-static int pending_queue = 0;	/* number of pending connections */
-static int pending_max = 100;	/* max number of pending connections */
 static int listen_queue = CONNECTIONS_MAX;
-int multi_accept = 100;
-int nservers;
-static int current;		/* current server */
-static client *clients;
-server *servers;
-static int emerg_server = -1;	/* server of last resort */
-static int emergency = 0;	/* are we using the emergency server? */
-static int abuse_server = -1;	/* server for naughty clients */
-static connection *conns;
 
 static int asciidump;
 static int loopflag;
 static int exit_enabled = 0;
-static int keepalive = 0;
 
 static int hupcounter = 0;
-static int clients_max = CLIENTS_MAX;
-static int servers_max = SERVERS_MAX;
-int connections_max = CONNECTIONS_MAX;
-static int connections_used = 0;
-static int connections_last = 0;
-static int blacklist_time = BLACKLIST_TIME;
-static int tracking_time = TRACKING_TIME;
-static int roundrobin = 0;
-static int weight = 0;
-static int prio = 0;
-static int hash = 0;
-static int stubborn = 0;
 
 static int stats_flag = 0;
 static int restart_log_flag = 0;
 static int http = 0;
-static int client_acl, control_acl;
-static int udp = 0;
-static int protoid = SOCK_STREAM;
 
 static char *cfgfile = NULL;
 static char *logfile = NULL;
@@ -135,159 +103,21 @@ static char listenport[1000];
 static int port;
 
 static char *ctrlport = NULL;
-static int listenfd, ctrlfd = -1;
-static char *e_server = NULL;
-static char *a_server = NULL;
+int listenfd;
+static int ctrlfd = -1;
 static char *jail = NULL;
 static char *user = NULL;
 static char *proto = "tcp";
 
-static int fd2conn_max = 0;
-static int *fd2conn;
-
 static char *dsr_if, *dsr_ip;
 
-static void close_conn(int);
-
 #ifdef WINDOWS
-#define SHUT_WR SD_SEND		/* for shutdown */
-
-#define LOG_CONS	0
-#define LOG_USER	0
-#define LOG_ERR		0
-#define LOG_DEBUG	0
-
-#define CONNECT_IN_PROGRESS (WSAEWOULDBLOCK)
-#define WOULD_BLOCK(err) (err == WSAEWOULDBLOCK)
-
-#define SIGHUP	0
-#define SIGUSR1	0
-#define SIGPIPE	0
-#define SIGCHLD	0
-
-typedef int sigset_t;
-typedef int siginfo_t;
-
-struct sigaction {
-	void     (*sa_handler)(int);
-	void     (*sa_sigaction)(int, siginfo_t *, void *);
-	sigset_t   sa_mask;
-	int        sa_flags;
-	void     (*sa_restorer)(void);
-};
-
-static int sigaction(int signum, const struct sigaction *act,
-		struct sigaction *oldact)
-{
-	return 0;
-}
-
-static int sigemptyset(sigset_t *set)
-{
-	return 0;
-}
-
-typedef int rlim_t;
-
-struct rlimit {
-	rlim_t rlim_cur;
-	rlim_t rlim_max;
-};
-
-#define RLIMIT_CORE 0
-
-static int getrlimit(int resource, struct rlimit *rlim)
-{
-	return 0;
-}
-
-static int setrlimit(int resource, const struct rlimit *rlim)
-{
-	return 0;
-}
-
-typedef int uid_t;
-typedef int gid_t;
-
-static uid_t getuid(void)
-{
-	return 0;
-}
-
-struct passwd {
-	uid_t pw_uid;
-	gid_t pw_gid;
-};
-
-static struct passwd *getpwnam(const char *name)
-{
-	static struct passwd p;
-	p.pw_uid = 0;
-	p.pw_gid = 0;
-	return &p;
-}
-
-static int chroot(const char *path)
-{
-	return 0;
-}
-
-static int setgid(gid_t gid)
-{
-	return 0;
-}
-
-static int setuid(uid_t uid)
-{
-	return 0;
-}
-
-int inet_aton(const char *cp, struct in_addr *addr)
-{
-	addr->s_addr = inet_addr(cp);
-	return (addr->s_addr == INADDR_NONE) ? 0 : 1;
-}
-
-static void make_nonblocking(int fd)
-{
-	int i;
-	u_long mode = 1;
-	if ((i = ioctlsocket(fd, FIONBIO, &mode)) != NO_ERROR)
-		error("Can't ioctlsocket, error = %d", i);
-}
-
-static WSADATA wsaData;
-static int ws_started = 0;
-
-static int start_winsock(void)
-{
-	int n;
-	DEBUG(1, "start_winsock()");
-	if (!ws_started) {
-		n = WSAStartup(MAKEWORD(2, 2), &wsaData);
-		if (n != NO_ERROR) {
-			error("Error at WSAStartup() [%d]", WSAGetLastError());
-		} else {
-			DEBUG(2, "Winsock started");
-			ws_started = 1;
-		}
-	}
-	return ws_started;
-}
-
-void stop_winsock(void)
-{
-	WSACleanup();
-	ws_started = 0;
-}
-
 /* because Windows scribbles over errno in an uncalled-for manner */
 static int saved_errno;
 #define SAVE_ERRNO (saved_errno = socket_errno)
 #define USE_ERRNO (saved_errno)
 
 #else	/* not windows */
-#define CONNECT_IN_PROGRESS (EINPROGRESS)
 #define WOULD_BLOCK(err) (err == EAGAIN || err == EWOULDBLOCK)
 
 #ifndef HAVE_ACCEPT4
@@ -386,72 +216,6 @@ static char *pen_strcasestr(const char *haystack, const char *needle)
 	}
 	return NULL;
 }
-
-/* store_conn does fd2conn_set(fd, conn) */
-/* close_conn does fd2conn_set(fd, -1) */
-static void fd2conn_set(int fd, int conn)
-{
-	DEBUG(3, "fd2conn_set(fd=%d, conn=%d)", fd, conn);
-	if (fd < 0) error("fd2conn_set(fd = %d, conn = %d)", fd, conn);
-	if (fd >= fd2conn_max) {
-		int i, new_max = fd+10000;
-		DEBUG(2, "expanding fd2conn to %d bytes", new_max);
-		fd2conn = pen_realloc(fd2conn, new_max * sizeof *fd2conn);
-		for (i = fd2conn_max; i < new_max; i++) fd2conn[i] = -1;
-		fd2conn_max = new_max;
-	}
-	fd2conn[fd] = conn;
-}
-
-static int fd2conn_get(int fd)
-{
-	if (fd < 0 || fd >= fd2conn_max) return -1;
-	return fd2conn[fd];
-}
-
-static int pen_hash(struct sockaddr_storage *a)
-{
-	struct sockaddr_in *si;
-	struct sockaddr_in6 *si6;
-	unsigned char *u;
-
-	switch (a->ss_family) {
-	case AF_INET:
-		si = (struct sockaddr_in *)a;
-		return si->sin_addr.s_addr % nservers;
-	case AF_INET6:
-		si6 = (struct sockaddr_in6 *)a;
-		u = (unsigned char *)(&si6->sin6_addr);
-		return u[15] % nservers;
-	default:
-		return 0;
-	}
-}
-
-static int pen_setport(struct sockaddr_storage *a, int port)
-{
-	struct sockaddr_in *si;
-	struct sockaddr_in6 *si6;
-
-	switch (a->ss_family) {
-	case AF_UNIX:
-		/* No port for Unix domain sockets */
-		return 1;
-	case AF_INET:
-		si = (struct sockaddr_in *)a;
-		si->sin_port = htons(port);
-		return 1;
-	case AF_INET6:
-		si6 = (struct sockaddr_in6 *)a;
-		si6->sin6_port = htons(port);
-		return 1;
-	default:
-		debug("pen_setport: Unknown address family %d", a->ss_family);
-	}
-	return 0;
-}
-
-
 
 static int webstats(void)
 {
@@ -670,80 +434,6 @@ static void die(int dummy)
 	abort();
 }
 
-/* Store client and return index */
-static int store_client(struct sockaddr_storage *cli)
-{
-	int i;
-	int empty = -1;		/* first empty slot */
-	int oldest = -1;	/* in case we need to recycle */
-	struct sockaddr_in *si;
-	struct sockaddr_in6 *si6;
-	int family = cli->ss_family;
-	unsigned long ad = 0;
-	void *ad6 = 0;
-
-	if (family == AF_INET) {
-		si = (struct sockaddr_in *)cli;
-		ad = si->sin_addr.s_addr;
-	} else if (family == AF_INET6) {
-		si6 = (struct sockaddr_in6 *)cli;
-		ad6 = &si6->sin6_addr;
-	}
-
-	for (i = 0; i < clients_max; i++) {
-		/* look for client with same family and address */
-		if (family == clients[i].addr.ss_family) {
-			if (family == AF_UNIX) break;
-			if (family == AF_INET) {
-				si = (struct sockaddr_in *)&clients[i].addr;
-				if (ad == si->sin_addr.s_addr) break;
-			}
-			if (family == AF_INET6) {
-				si6 = (struct sockaddr_in6 *)&clients[i].addr;
-				if (!memcmp(ad6, &si6->sin6_addr, sizeof *ad6)) break;
-			}
-		}
-
-		/* recycle slots of client that haven't been used for some time */
-		if (tracking_time > 0 && clients[i].last+tracking_time < now) {
-			/* too old, recycle */
-			clients[i].last = 0;
-		}
-
-		/* we already have an empty slot but keep looking for known client */
-		if (empty != -1) continue;
-
-		/* remember this empty slot in case we need it later */
-		if (clients[i].last == 0) {
-			empty = i;
-			continue;
-		}
-
-		/* and if we can't find any reusable slot we'll reuse the oldest one */
-		if (oldest == -1 || (clients[i].last < clients[oldest].last)) {
-			oldest = i;
-		}
-	}
-
-	/* reset statistics in case this is a "new" client */
-	if (i == clients_max) {
-		if (empty != -1) i = empty;
-		else i = oldest;
-		clients[i].connects = 0;
-		clients[i].csx = 0;
-		clients[i].crx = 0;
-	}
-
-	clients[i].last = now;
-	clients[i].addr = *cli;
-	clients[i].server = -1;
-	clients[i].connects++;
-
-	DEBUG(2, "Client %s has index %d", pen_ntoa(cli), i);
-
-	return i;
-}
-
 static void dump(unsigned char *p, int n)
 {
 	int i;
@@ -758,55 +448,6 @@ static void dump(unsigned char *p, int n)
 		}
 	}
 	fprintf(stderr, "\n");
-}
-
-/* return port number in host byte order */
-static int getport(char *p, char *proto)
-{
-	struct servent *s = getservbyname(p, proto);
-	if (s == NULL) {
-		return atoi(p);
-	} else {
-		return ntohs(s->s_port);
-	}
-}
-
-/* Introduce the new format "[address]:port:maxc:hard:weight:prio"
-   in addition to the old one.
-*/
-static void setaddress(int server, char *s, int dp, char *proto)
-{
-	char address[1024], pno[100];
-	int n;
-	char *format;
-	int port;
-
-	if (s[0] == '[') {
-		format = "[%999[^]]]:%99[^:]:%d:%d:%d:%d";
-	} else {
-		format = "%999[^:]:%99[^:]:%d:%d:%d:%d";
-	}
-	n = sscanf(s, format, address, pno,
-		&servers[server].maxc, &servers[server].hard,
-		&servers[server].weight, &servers[server].prio);
-
-	if (n > 1) port = getport(pno, proto);
-	else port = dp;
-	if (n < 3) servers[server].maxc = 0;
-	if (n < 4) servers[server].hard = 0;
-	if (n < 5) servers[server].weight = 0;
-	if (n < 6) servers[server].prio = 0;
-
-	DEBUG(2, "n = %d, address = %s, pno = %d, maxc1 = %d, hard = %d, weight = %d, prio = %d, proto = %s ", \
-		n, address, port, servers[server].maxc, \
-		servers[server].hard, servers[server].weight, \
-		servers[server].prio, proto);
-
-	if (pen_aton(address, &servers[server].addr) == 0) {
-		error("unknown or invalid address [%s]", address);
-	}
-	memset(servers[server].hwaddr, 0, 6);
-	pen_setport(&servers[server].addr, port);
 }
 
 /* Log format is:
@@ -942,17 +583,6 @@ static void change_events(int i)
 		if (conns[i].downfd != -1) event_arm(conns[i].downfd, down_events);
 		if (conns[i].upfd != -1) event_arm(conns[i].upfd, up_events);
 	}
-}
-
-static int closing_time(int conn)
-{
-	int closed = conns[conn].state & CS_CLOSED;
-
-	if (closed == CS_CLOSED) return 1;
-	if (conns[conn].downn + conns[conn].upn == 0) {
-		return closed & tcp_fastclose;
-	}
-	return 0;
 }
 
 static int my_recv(int fd, void *buf, size_t len, int flags)
@@ -1189,124 +819,6 @@ static void alarm_handler(int dummy)
 	DEBUG(2, "alarm_handler(%d)", dummy);
 }
 
-#ifdef HAVE_LIBSSL
-static int store_conn(int downfd, SSL *ssl, int client)
-#else
-static int store_conn(int downfd, int client)
-#endif
-{
-	int i;
-
-	i = connections_last;
-	do {
-		if (conns[i].state == CS_UNUSED) break;
-		i++;
-		if (i >= connections_max) i = 0;
-	} while (i != connections_last);
-
-	if (conns[i].state == CS_UNUSED) {
-		connections_last = i;
-		connections_used++;
-		DEBUG(2, "incrementing connections_used to %d for connection %d",
-			connections_used, i);
-		conns[i].upfd = -1;
-		conns[i].downfd = downfd;
-		if (downfd != -1) fd2conn_set(downfd, i);
-#ifdef HAVE_LIBSSL
-		conns[i].ssl = ssl;
-#endif
-		conns[i].client = client;
-		conns[i].initial = -1;
-		conns[i].server = -1;
-		conns[i].srx = conns[i].ssx = 0;
-		conns[i].crx = conns[i].csx = 0;
-	} else {
-		i = -1;
-		if (debuglevel)
-			debug("Connection table full (%d slots), can't store connection.\n"
-			      "Try restarting with -x %d",
-			      connections_max, 2*connections_max);
-		if (downfd != -1) close(downfd);
-	}
-	DEBUG(2, "store_conn: conn = %d, downfd = %d, connections_used = %d", \
-		i, downfd, connections_used);
-	return i;
-}
-
-static int idler(int conn)
-{
-	return (conns[conn].state & CS_CONNECTED) && (conns[conn].client == -1);
-}
-
-static void close_conn(int i)
-{
-	int index = conns[i].server;
-
-	/* unfinished connections have server == -1 */
-	if (index != -1) {
-		servers[index].c -= 1;
-		if (servers[index].c < 0) servers[index].c = 0;
-	}
-
-	if (conns[i].upfd != -1 && conns[i].upfd != listenfd) {
-		event_delete(conns[i].upfd);
-		close(conns[i].upfd);
-		fd2conn_set(conns[i].upfd, -1);
-	}
-#ifdef HAVE_LIBSSL
-	if (conns[i].ssl) {
-		int n = SSL_shutdown(conns[i].ssl);
-		DEBUG(3, "First SSL_shutdown(%d) returns %d", conns[i].ssl, n);
-		if (n == 0) {
-			n = SSL_shutdown(conns[i].ssl);
-			DEBUG(3, "Second SSL_shutdown(%d) returns %d", conns[i].ssl, n);
-		}
-		if (n == -1) {
-			n = SSL_get_error(conns[i].ssl, n);
-			DEBUG(3, "%s", ERR_error_string(SSL_get_error(conns[i].ssl, n), NULL));
-			ERR_print_errors_fp(stderr);
-		}
-		SSL_free(conns[i].ssl);
-		conns[i].ssl = 0;
-	}
-#endif
-	if (conns[i].downfd != -1 && conns[i].downfd != listenfd) {
-		event_delete(conns[i].downfd);
-		close(conns[i].downfd);
-		fd2conn_set(conns[i].downfd, -1);
-	}
-	if (idler(i)) idlers--;
-	conns[i].upfd = conns[i].downfd = -1;
-	if (conns[i].downn) {
-		free(conns[i].downb);
-		conns[i].downn=0;
-	}
-	if (conns[i].upn) {
-		free(conns[i].upb);
-		conns[i].upn=0;
-	}
-	connections_used--;
-	DEBUG(2, "decrementing connections_used to %d for connection %d",
-		connections_used, i);
-	if (connections_used < 0) {
-		debug("connections_used = %d. Resetting.", connections_used);
-		connections_used = 0;
-	}
-	if (conns[i].state == CS_IN_PROGRESS) {
-		pending_list = dlist_remove(conns[i].pend);
-		pending_queue--;
-	}
-	conns[i].state = CS_UNUSED;
-	DEBUG(2, "close_conn: Closing connection %d to server %d; connections_used = %d\n" \
-		"\tRead %ld from client, wrote %ld to server\n" \
-		"\tRead %ld from server, wrote %ld to client", \
-		i, index, connections_used, \
-		conns[i].crx, conns[i].ssx, \
-		conns[i].srx, conns[i].csx);
-	DEBUG(3, "Aggregate for server %d: sx=%d, rx=%d",
-		conns[i].server, servers[conns[i].server].sx, servers[conns[i].server].rx);
-}
-
 
 static void usage(void)
 {
@@ -1477,105 +989,6 @@ static void init(int argc, char **argv)
 	}
 }
 
-static void blacklist_server(int server)
-{
-	servers[server].status = now;
-}
-
-/* Initiate connection to server 'index' and populate upfd field in connection */
-/* return 1 for (potential) success, 0 for failure */
-static int try_server(int index, int conn)
-{
-	int upfd;
-	int client = conns[conn].client;
-	int n = 0, err;
-	int optval = 1;
-	struct sockaddr_storage *addr = &servers[index].addr;
-	/* The idea is that a client should be able to connect again to the same server
-	   even if the server is close to its configured connection limit */
-	int sticky = ((client != -1) && (index == clients[client].server));
-
-	DEBUG(2, "Trying server %d for connection %d at time %d", index, conn, now);
-	if (index < 0) return 0;	/* out of bounds */
-	if (pen_getport(addr) == 0) {
-		DEBUG(1, "No port for you!");
-		return 0;
-	}
-	if (now-servers[index].status < blacklist_time) {
-		DEBUG(1, "Server %d is blacklisted", index);
-		return 0;
-	}
-	if (servers[index].maxc != 0 &&
-	    (servers[index].c >= servers[index].maxc) &&
-	    (sticky == 0 || servers[index].c >= servers[index].hard)) {
-		DEBUG(1, "Server %d is overloaded: sticky=%d, maxc=%d, hard=%d", \
-				index, sticky, servers[index].maxc, servers[index].hard);
-		return 0;
-	}
-	if ((client != -1) && !match_acl(servers[index].acl, &(clients[client].addr))) {
-		DEBUG(1, "try_server: denied by acl");
-		return 0;
-	}
-	upfd = socket_nb(addr->ss_family, protoid, 0);
-
-	if (keepalive) {
-		setsockopt(upfd, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof optval);
-	}
-
-	if (debuglevel > 1) {
-		debug("Connecting to %s", pen_ntoa(addr));
-		pen_dumpaddr(addr);
-	}
-	conns[conn].t = now;
-	n = connect(upfd, (struct sockaddr *)addr, pen_ss_size(addr));
-	err = socket_errno;
-	DEBUG(2, "connect (upfd = %d) returns %d, errno = %d, socket_errno = %d",
-		upfd, n, errno, err);
-	/* A new complication is that we don't know yet if the connect will succeed. */
-	if (n == 0) {		/* connection completed */
-		conns[conn].state = CS_CONNECTED;
-		if (conns[conn].downfd == -1) {
-			/* idler */
-			conns[conn].state |= CS_CLOSED_DOWN;
-		}
-		event_add(upfd, EVENT_READ);
-		if (!udp) event_add(conns[conn].downfd, EVENT_READ);
-		servers[index].c++;
-		if (servers[index].status) {
-			servers[index].status = 0;
-			DEBUG(1, "Server %d ok", index);
-		}
-		DEBUG(2, "Successful connect to server %d\n" \
-			"conns[%d].client = %d\n" \
-			"conns[%d].server = %d", \
-			index, conn, conns[conn].client, conn, conns[conn].server);
-	} else if (err == CONNECT_IN_PROGRESS) {	/* may potentially succeed */
-		conns[conn].state = CS_IN_PROGRESS;
-		pending_list = dlist_insert(pending_list, conn);
-		conns[conn].pend = pending_list;
-		pending_queue++;
-		event_add(upfd, EVENT_WRITE);
-		DEBUG(2, "Pending connect to server %d\n" \
-			"conns[%d].client = %d\n" \
-			"conns[%d].server = %d", \
-			index, conn, conns[conn].client, conn, conns[conn].server);
-	} else {		/* failed definitely */
-		if (servers[index].status == 0) {
-			debug("Server %d failed, retry in %d sec: %d",
-				index, blacklist_time, socket_errno);
-		}
-		debug("blacklisting server %d because connect error %d", index, err);
-		blacklist_server(index);
-		close(upfd);
-		return 0;
-	}
-	conns[conn].server = index;
-	current = index;
-	conns[conn].upfd = upfd;
-	fd2conn_set(upfd, conn);
-	return 1;
-}
-
 static void open_log(char *logfile)
 {
 	if (logfp) {
@@ -1725,13 +1138,13 @@ static void write_cfg(char *p)
 	fprintf(fp, "client_acl %d\n", client_acl);
 	fprintf(fp, "control_acl %d\n", control_acl);
 	fprintf(fp, "debug %d\n", debuglevel);
-	if (hash) fprintf(fp, "hash\n");
+	if (server_alg & ALG_HASH) fprintf(fp, "hash\n");
 	else fprintf(fp, "no hash\n");
 	if (http) fprintf(fp, "http\n");
 	else fprintf(fp, "no http\n");
 	if (logfile) fprintf(fp, "log %s\n", logfile);
 	else fprintf(fp, "no log\n");
-	if (roundrobin) fprintf(fp, "roundrobin\n");
+	if (server_alg & ALG_ROUNDROBIN) fprintf(fp, "roundrobin\n");
 	else fprintf(fp, "no roundrobin\n");
 	for (i = 0; i < nservers; i++) {
 		fprintf(fp,
@@ -1739,11 +1152,11 @@ static void write_cfg(char *p)
 			i, servers[i].acl,
 			pen_ntoa(&servers[i].addr), pen_getport(&servers[i].addr),
 			servers[i].maxc, servers[i].hard);
-		if (weight) fprintf(fp, " weight %d", servers[i].weight);
-		if (prio) fprintf(fp, " prio %d", servers[i].prio);
+		if (server_alg & ALG_WEIGHT) fprintf(fp, " weight %d", servers[i].weight);
+		if (server_alg & ALG_PRIO) fprintf(fp, " prio %d", servers[i].prio);
 		fprintf(fp, "\n");
 	}
-	if (stubborn) fprintf(fp, "stubborn\n");
+	if (server_alg & ALG_STUBBORN) fprintf(fp, "stubborn\n");
 	else fprintf(fp, "no stubborn\n");
 	if (tcp_fastclose == CS_CLOSED) {
 		fprintf(fp, "tcp_fastclose both\n");
@@ -1763,9 +1176,9 @@ static void write_cfg(char *p)
 	fprintf(fp, "tracking %d\n", tracking_time);
 	if (webfile) fprintf(fp, "web_stats %s\n", webfile);
 	else fprintf(fp, "no web_stats\n");
-	if (weight) fprintf(fp, "weight\n");
+	if (server_alg & ALG_WEIGHT) fprintf(fp, "weight\n");
 	else fprintf(fp, "no weight\n");
-	if (prio) fprintf(fp, "prio\n");
+	if (server_alg & ALG_PRIO) fprintf(fp, "prio\n");
 	else fprintf(fp, "no prio\n");
 	fclose(fp);
 }
@@ -1908,7 +1321,7 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 			output(op, "Exit is not enabled; restart with -X flag\n");
 		}
 	} else if (!strcmp(p, "hash")) {
-		hash = 1;
+		server_alg |= ALG_HASH;
 	} else if (!strcmp(p, "http")) {
 		http = 1;
 	} else if (!strcmp(p, "idle_timeout")) {
@@ -1957,11 +1370,11 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		}
 	} else if (!strcmp(p, "mode")) {
 		output(op, "%shash %sroundrobin %sstubborn %sweight %sprio\n",
-			hash?"":"no ",
-			roundrobin?"":"no ",
-			stubborn?"":"no ",
-			weight?"":"no ",
-			prio?"":"no ");
+			(server_alg & ALG_HASH)?"":"no ",
+			(server_alg & ALG_ROUNDROBIN)?"":"no ",
+			(server_alg & ALG_STUBBORN)?"":"no ",
+			(server_alg & ALG_WEIGHT)?"":"no ",
+			(server_alg & ALG_PRIO)?"":"no ");
 	} else if (!strcmp(p, "no")) {
 		p = strtok(NULL, " ");
 		if (p == NULL) return;
@@ -1977,7 +1390,7 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		} else if (!strcmp(p, "dummy")) {
 			dummy = 0;
 		} else if (!strcmp(p, "hash")) {
-			hash = 0;
+			server_alg &= ~ALG_HASH;
 		} else if (!strcmp(p, "http")) {
 			http = 0;
 		} else if (!strcmp(p, "keepalive")) {
@@ -1987,17 +1400,17 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 			if (logfp) fclose(logfp);
 			logfp = NULL;
 		} else if (!strcmp(p, "prio")) {
-			prio = 0;
+			server_alg &= ~ALG_PRIO;
 		} else if (!strcmp(p, "roundrobin")) {
-			roundrobin = 0;
+			server_alg &= ~ALG_ROUNDROBIN;
 		} else if (!strcmp(p, "stubborn")) {
-			stubborn = 0;
+			server_alg &= ~ALG_STUBBORN;
 		} else if (!strcmp(p, "tcp_nodelay")) {
 			tcp_nodelay = 0;
 		} else if (!strcmp(p, "web_stats")) {
 			webfile = NULL;
 		} else if (!strcmp(p, "weight")) {
-			weight = 0;
+			server_alg &= ~ALG_WEIGHT;
 		}
 	} else if (!strcmp(p, "pending_max")) {
 		p = strtok(NULL, " ");
@@ -2008,7 +1421,7 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 	} else if (!strcmp(p, "poll")) {
 		event_init = poll_init;
 	} else if (!strcmp(p, "prio")) {
-		prio = 1;
+		server_alg |= ALG_PRIO;
 	} else if (!strcmp(p, "recent")) {
 		time_t when = now;
 		p = strtok(NULL, " ");
@@ -2022,7 +1435,7 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 				clients[n].csx, clients[n].crx);
 		}
 	} else if (!strcmp(p, "roundrobin")) {
-		roundrobin = 1;
+		server_alg |= ALG_ROUNDROBIN;
 	} else if (!strcmp(p, "select")) {
 		event_init = select_init;
 	} else if (!strcmp(p, "server")) {
@@ -2132,7 +1545,7 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		}
 #endif	/* HAVE_SSL */
 	} else if (!strcmp(p, "stubborn")) {
-		stubborn = 1;
+		server_alg |= ALG_STUBBORN;
 	} else if (!strcmp(p, "tcp_fastclose")) {
 		p = strtok(NULL, " ");
 		if (!p) {
@@ -2168,7 +1581,7 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 			output(op, "%s\n", webfile);
 		}
 	} else if (!strcmp(p, "weight")) {
-		weight = 1;
+		server_alg |= ALG_WEIGHT;
 	} else if (!strcmp(p, "write")) {
 		p = strtok(NULL, " ");
 		if (!p) p = cfgfile;
@@ -2242,143 +1655,6 @@ static void read_cfg(char *cf)
 		do_cmd(b, output_file, stdout);
 	}
 	fclose(fp);
-}
-
-int unused_server_slot(int i)
-{
-	struct sockaddr_storage *a = &servers[i].addr;
-	if (a->ss_family == AF_INET) {
-		struct sockaddr_in *si = (struct sockaddr_in *)a;
-		if (si->sin_addr.s_addr == 0) return i;
-	}
-	return 0;
-}
-
-int server_is_blacklisted(int i)
-{
-	return (now-servers[i].status < blacklist_time);
-}
-
-static int server_is_unavailable(int i)
-{
-	return unused_server_slot(i) || server_is_blacklisted(i);
-}
-
-static int server_by_weight(void)
-{
-	int best_server = -1;
-	int best_load = -1;
-	int i, load;
-
-	DEBUG(2, "server_by_weight()");
-	for (i = 0; i < nservers; i++) {
-		if (server_is_unavailable(i)) continue;
-		if (servers[i].weight == 0) continue;
-		load = (WEIGHT_FACTOR*servers[i].c)/servers[i].weight;
-		if (best_server == -1 || load < best_load) {
-			DEBUG(2, "Server %d has load %d", i, load);
-			best_load = load;
-			best_server = i;
-		}
-	}
-	DEBUG(2, "Least loaded server = %d", best_server);
-	return best_server;
-}
-
-static int server_by_prio(void)
-{
-	int best_server = -1;
-	int best_prio = -1;
-	int i, prio;
-
-	DEBUG(2, "server_by_prio()");
-	for (i = 0; i < nservers; i++) {
-		if (server_is_unavailable(i)) continue;
-		prio = servers[i].prio;
-		if (best_server == -1 || prio < best_prio) {
-			DEBUG(2, "Server %d has prio %d", i, prio);
-			best_prio = prio;
-			best_server = i;
-		}
-	}
-	DEBUG(2, "Best prio server = %d", best_server);
-	return best_server;
-}
-
-static int server_by_roundrobin(void)
-{
-	static int last_server = 0;
-	int i = last_server;
-
-	do {
-		i = (i+1) % nservers;
-		DEBUG(3, "server_by_roundrobin considering server %d", i);
-		if (!server_is_unavailable(i)) return (last_server = i);
-		DEBUG(3, "server %d is unavailable, try next one", i);
-	} while (i != last_server);
-	return -1;
-}
-
-/* Suggest a server for the initial field of the connection.
-   Return -1 if none available.
-*/
-static int initial_server(int conn)
-{
-	int pd = match_acl(client_acl, &clients[conns[conn].client].addr);
-	if (!pd) {
-		DEBUG(1, "initial_server: denied by acl");
-		return abuse_server;
-	}
-	if (!roundrobin) {
-		// Load balancing with memory == No roundrobin
-		int server = clients[conns[conn].client].server;
-		/* server may be -1 if this is a new client */
-		if (server != -1 && server != emerg_server && server != abuse_server) {
-			return server;
-		}
-	}
-	if (prio) return server_by_prio();
-	if (weight) return server_by_weight();
-	if (hash) return pen_hash(&clients[conns[conn].client].addr);
-	return server_by_roundrobin();
-}
-
-/* Returns 1 if a failover server candidate is available.
-   Close connection and return 0 if none was found.
-*/
-static int failover_server(int conn)
-{
-	int server = conns[conn].server;
-	DEBUG(2, "failover_server(%d)", conn);
-	if (stubborn) {
-		DEBUG(2, "Won't failover because we are stubborn");
-		close_conn(conn);
-		return 0;
-	}
-	if (server == abuse_server) {
-		DEBUG(2, "Won't failover from abuse server");
-		close_conn(conn);
-		return 0;
-	}
-	if (server == emerg_server) {
-		DEBUG(2, "Already using emergency server, won't fail over");
-		close_conn(conn);
-		return 0;
-	}
-	if (conns[conn].upfd != -1) {
-		close(conns[conn].upfd);
-		conns[conn].upfd = -1;
-	}
-	do {
-		server = (server+1) % nservers;
-		DEBUG(2, "Intend to try server %d", server);
-		if (try_server(server, conn)) return 1;
-	} while (server != conns[conn].initial);
-	DEBUG(1, "using emergency server, remember to reset flag");
-	emergency = 1;
-	if (try_server(emerg_server, conn)) return 1;
-	close_conn(conn);
-	return 0;
 }
 
 static void add_client(int downfd, struct sockaddr_storage *cli_addr)
@@ -2840,43 +2116,6 @@ static int handle_events(int *pending_close)
 	return npc;
 }
 
-static void close_idlers(int n)
-{
-	int conn;
-
-	DEBUG(2, "close_idlers(%d)", n);
-	for (conn = 0; n > 0 && conn < connections_max; conn++) {
-		if (idler(conn)) {
-			DEBUG(3, "Closing idling connection %d", conn);
-			close_conn(conn);
-			n--;
-		}
-	}
-}
-
-static int add_idler(void)
-{
-#ifdef HAVE_LIBSSL
-	int conn = store_conn(-1, NULL, -1);
-#else
-	int conn = store_conn(-1, -1);
-#endif
-	if (conn == -1) return 0;
-	conns[conn].initial = server_by_roundrobin();
-	if (conns[conn].initial == -1) {
-		close_conn(conn);
-		return 0;
-	}
-	if (!try_server(conns[conn].initial, conn)) {
-		if (!failover_server(conn)) {
-			close_conn(conn);
-			return 0;
-		}
-	}
-	idlers++;
-	return 1;
-}
-
 static void pending_and_closing(int *pending_close, int npc)
 {
 	int j, p, start;
@@ -2999,7 +2238,7 @@ static int options(int argc, char **argv)
 			udp = 1;
 			break;
 		case 'W':
-			weight = 1;
+			server_alg |= ALG_WEIGHT;
 			break;
 		case 'X':
 	    		exit_enabled = 1;
@@ -3023,7 +2262,7 @@ static int options(int argc, char **argv)
 			foreground = 1;
 			break;
 		case 'h':
-			hash = 1;
+			server_alg |= ALG_HASH;
 			break;
 		case 'i':
 #ifdef WINDOWS
@@ -3064,10 +2303,10 @@ static int options(int argc, char **argv)
 			}
 			break;
 		case 'r':
-			roundrobin = 1;
+			server_alg |= ALG_ROUNDROBIN;
 			break;
 		case 's':
-			stubborn = 1;
+			server_alg |= ALG_STUBBORN;
 			break;
 		case 't':
 			timeout = atoi(optarg);

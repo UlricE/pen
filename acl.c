@@ -22,6 +22,7 @@ GeoIP *geoip4, *geoip6;
 static int nacls[ACLS_MAX];
 static acl *acls[ACLS_MAX];
 static unsigned char mask_ipv6[129][16];
+int client_acl, control_acl;
 
 static void init_mask(void)
 {

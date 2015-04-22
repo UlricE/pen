@@ -18,6 +18,12 @@
 #define SPAM
 #endif
 
+#ifdef WINDOWS
+#define socket_errno WSAGetLastError()
+#else
+#define socket_errno errno
+#endif
+
 extern int debuglevel;
 extern void debug(char *, ...);
 extern void error(char *, ...);
