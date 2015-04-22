@@ -1,3 +1,5 @@
+#include <netinet/in.h>
+
 #define ACLS_MAX	10	/* max acls */
 
 typedef struct {
