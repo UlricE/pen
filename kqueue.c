@@ -3,7 +3,9 @@
 #include <stdlib.h>
 #include <errno.h>
 //#include "pen.h"
+#include "conn.h"
 #include "diag.h"
+#include "event.h"
 #ifdef HAVE_KQUEUE
 #include <sys/types.h>
 #include <sys/event.h>
