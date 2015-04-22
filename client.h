@@ -1,3 +1,4 @@
+#include <time.h>
 #include <sys/socket.h>
 
 #define CLIENTS_MAX	2048	/* max clients */
