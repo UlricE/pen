@@ -379,4 +379,14 @@ int dsr_init(char *dsr_if, char *dsr_ip)
 	error("Direct server return is not available");
 	return -1;
 }
+
+void dsr_arp(int fd)
+{
+	error("Direct server return is not available");
+}
+
+void dsr_frame(int fd)
+{
+	error("Direct server return is not available");
+}
 #endif
