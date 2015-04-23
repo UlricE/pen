@@ -826,9 +826,11 @@ static void usage(void)
 	       "  pen [-C addr:port] [-X] [-b sec] [-S N] [-c N] [-e host[:port]] \\\n"
 	       "	  [-t sec] [-x N] [-w dir] [-HPWadfhrs] \\\n"
 	       "          [-o option] \\\n"
+#ifdef HAVE_LIBSSL
 	       "	  [-E certfile] [-K keyfile] \\\n"
 	       "	  [-G cacertfile] [-A cacertdir] \\\n"
 	       "	  [-Z] [-R] [-L protocol] \\\n"
+#endif
 	       "	  [host:]port h1[:p1[:maxc1[:hard1[:weight1[:prio1]]]]] [h2[:p2[:maxc2[:hard2[:weight2[:prio2]]]]]] ...\n"
 	       "\n"
 	       "  -B host:port abuse server for naughty clients\n"
@@ -860,6 +862,7 @@ static void usage(void)
 	       "  -x N      max number of simultaneous connections [%d]\n"
 	       "  -w file   save statistics in HTML format in a file\n"
 	       "  -o option use option in penctl format\n"
+#ifdef HAVE_LIBSSL
 	       "  -E certfile   use the given certificate in PEM format\n"
 	       "  -K keyfile    use the given key in PEM format (may be contained in cert)\n"
 	       "  -G cacertfile file containing the CA's certificate\n"
@@ -867,6 +870,7 @@ static void usage(void)
 	       "  -Z	    use SSL compatibility mode\n"
 	       "  -R	    require valid peer certificate\n"
 	       "  -L protocol   ssl23 (default), ssl2, ssl3 or tls1\n"
+#endif
 	       "\n"
 	       "example:\n"
 	       "  pen smtp mailhost1:smtp mailhost2:25 mailhost3\n"
@@ -2383,6 +2387,9 @@ int main(int argc, char **argv)
 	argc -= n;
 	argv += n;
 
+	if (argc < 1) {
+		usage();
+	}
 	now = time(NULL);
 #ifdef WINDOWS
 	start_winsock();
