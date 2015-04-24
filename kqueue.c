@@ -2,10 +2,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
-//#include "pen.h"
 #include "conn.h"
 #include "diag.h"
 #include "event.h"
+#include "memory.h"
 #ifdef HAVE_KQUEUE
 #include <sys/types.h>
 #include <sys/event.h>
@@ -16,14 +16,6 @@ static struct kevent *kev, *kev_out;
 static int nfds, maxevents;
 static int count;
 static int pindex;
-
-#if 0
-static void kqueue_event_reset(void)
-{
-	DEBUG(2, "kqueue_event_reset()");
-        nfds = 0;
-}
-#endif
 
 static void kqueue_event_add(int fd, int events)
 {
