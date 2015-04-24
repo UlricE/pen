@@ -140,7 +140,7 @@ int dsr_init(char *dsr_if, char *listenport)
 	/* display mac */
  	strncpy(ifr.ifr_name, dsr_if, IFNAMSIZ-1);
 	n = ioctl(fd, SIOCGIFHWADDR, &ifr);
-	if (n == -1) perror("ioctl");
+	if (n == -1) debug("ioctl: %s", strerror(errno));
 	memcpy(our_hw_addr, ifr.ifr_hwaddr.sa_data, 6);
 	DEBUG(2, "Our hw addr: %s\n", mac2str(our_hw_addr));
 
@@ -155,7 +155,7 @@ int dsr_init(char *dsr_if, char *listenport)
 	sll.sll_ifindex = ifindex;
 	sll.sll_protocol = htons(ETH_P_ALL);
 	if (bind(fd, (struct sockaddr *)&sll, sizeof sll) == -1) {
-		perror("bind");
+		debug("bind: %s", strerror(errno));
 	}
 
 	return fd;
@@ -180,7 +180,7 @@ void send_arp_request(int fd, struct in_addr *a)
 	n = sendto(fd, buf, 42, 0, NULL, 0);
 	DEBUG(2, "Sent %d bytes arp request", n);
 	if (n == -1) {
-		perror("sendto");
+		debug("sendto: %s", strerror(errno));
 	}
 }
 
@@ -235,7 +235,7 @@ static void arp_frame(int fd, int n)
 		n = sendto(fd, buf, n, 0, NULL, 0);
 		DEBUG(2, "Sent %d bytes", n);
 		if (n == -1) {
-			perror("sendto");
+			debug("sendto: %s", strerror(errno));
 		}
 	} else if ((arp_htype == 1) &&
 		   (arp_ptype == 0x0800) &&
@@ -380,7 +380,7 @@ static void ipv4_frame(int fd, int n)
 			n = sendto(fd, buf, n, 0, NULL, 0);
 			DEBUG(2, "Sent %d bytes", n);
 			if (n == -1) {
-				perror("sendto");
+				debug("sendto: %s", strerror(errno));
 			}
 		}
 	}

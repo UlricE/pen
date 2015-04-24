@@ -1921,12 +1921,12 @@ static void check_listen_socket(void)
 				(struct sockaddr *)&cli_addr, &clilen);
 			if (downfd < 0) {
 				if (debuglevel && errno != EAGAIN) {
-					perror("accept");
+					debug("accept: %s", strerror(errno));
 				}
 				break;
 			}
 			if (clilen == 0) {
-				if (debuglevel) perror("clilen");
+				DEBUG(1, "clilen: %s", strerror(errno));
 				break;
 			}
 			add_client(downfd, &cli_addr);
@@ -1942,11 +1942,11 @@ static void check_control_socket(void)
 	int downfd = accept(ctrlfd, (struct sockaddr *) &cli_addr, &clilen);
 	DEBUG(2, "check_control_socket()");
 	if (downfd < 0) {
-		if (debuglevel) perror("accept");
+		DEBUG(1, "accept: %s", strerror(errno));
 		return;
 	}
 	if (clilen == 0) {
-		if (debuglevel) perror("clilen");
+		DEBUG(1, "clilen: %s", strerror(errno));
 		return;
 	}
 	do_ctrl(downfd, &cli_addr);

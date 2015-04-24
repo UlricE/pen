@@ -6,8 +6,8 @@ pen_SOURCES = pen.c select.c poll.c kqueue.c epoll.c dlist.c ssl.c dsr.c memory.
 
 mergelogs_SOURCES = mergelogs.c
 penctl_SOURCES = penctl.c
-penlog_SOURCES = penlog.c
-penlogd_SOURCES = penlogd.c
+penlog_SOURCES = penlog.c diag.c settings.c
+penlogd_SOURCES = penlogd.c diag.c settings.c
 
 doc_DATA = penstats HOWTO AUTHORS README ChangeLog COPYING
 

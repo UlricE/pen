@@ -63,8 +63,7 @@ static void poll_event_wait(void)
         poll_count = poll(poll_ufds, poll_nfds, 1000*timeout);
 	DEBUG(2, "poll returns %d", poll_count);
         if (poll_count < 0 && errno != EINTR) {
-                perror("poll");
-                error("Error on poll");
+                error("Error on poll: %s", strerror(errno));
         }
 }
 

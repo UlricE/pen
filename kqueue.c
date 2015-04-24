@@ -77,8 +77,7 @@ static void kqueue_event_wait(void)
         count = kevent(kq, kev, nfds, kev_out, maxevents, &tv);
 	DEBUG(2, "kevent returns %d", count);
         if (count < 0 && errno != EINTR) {
-                perror("kevent");
-                error("Error on kevent");
+                error("Error on kevent: %s", strerror(errno));
         }
 	pindex = -1;
 	nfds = 0;
@@ -101,8 +100,7 @@ void kqueue_init(void)
 {
 	kq = kqueue();
 	if (kq == -1) {
-		perror("kqueue");
-		error("Error creating kernel queue");
+		error("Error creating kernel queue: %s", strerror(errno));
 	}
 	maxevents = connections_max*2+2;
 	kev = pen_malloc(maxevents*sizeof *kev);

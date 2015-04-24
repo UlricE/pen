@@ -1,4 +1,7 @@
 
+150424	Replaced all calls to perror with debug(..., strerror(errno);
+	Updated penlog and penlogd to use diag.[ch].
+
 150422	More refactoring: broke out conn.[ch], client.[ch], server.[ch],
 	idler.[ch].
 	Made a hash index such that the load balancer may balance load.

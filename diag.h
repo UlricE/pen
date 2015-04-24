@@ -1,3 +1,5 @@
+#include <errno.h>
+
 #ifdef DEBUGGING
 #define DEBUG(lvl, ...) \
 	if (debuglevel >= lvl) { \
