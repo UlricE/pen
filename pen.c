@@ -3702,9 +3702,11 @@ int main(int argc, char **argv)
 	argc -= n;
 	argv += n;
 
+#ifndef WINDOWS
 	if (argc < 1) {
 		usage();
 	}
+#endif
 	now = time(NULL);
 #ifdef WINDOWS
 	start_winsock();
