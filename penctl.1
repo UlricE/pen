@@ -108,6 +108,9 @@ Always wait for the next round of the main loop before forwarding data. Normally
 \fIno delayed_forward\fR
 Try to forward data immediately, to avoid the overhead of copying it to a temporary buffer and waiting for the next main loop round.
 .TP
+\fIdsr_if IF\fR
+Use IF as the interface for Direct Server Return.
+.TP
 \fIdummy\fR
 Act as a dummy web server with very limited functionality but high performance. Only useful for testing. Disabled by default.
 .TP

@@ -1,5 +1,26 @@
 
+150424	Replaced all calls to perror with debug(..., strerror(errno);
+	Updated penlog and penlogd to use diag.[ch].
+
+150422	More refactoring: broke out conn.[ch], client.[ch], server.[ch],
+	idler.[ch].
+	Made a hash index such that the load balancer may balance load.
+
+150420	Broke out Windows code from pen.c into windows.c. Added windows.h.
+
+150419	Broke out public definitions for dsr into dsr.h.
+	Broke out memory management into memory.[ch].
+	Broke out dignostic and logging functions into diag.[ch].
+	Broke out settings into settings.[ch].
+	Broke out access lists into acl.[ch].
+	Broke out event initialization into event.[ch].
+	Added pen_epoll.h, pen_kqueue.h, pen_poll.h, pen_select.h.
+	Broke out pen_aton et al into netconv.[ch].
+
+150416	Added dsr.c
+
 150408	Bug in copy_down affecting SSL connections fixed.
+	Released 0.27.5.
 
 150408	Updated ocsp stapling to be compatible with server name indication.
 	Added pen-ocsp.sh script.

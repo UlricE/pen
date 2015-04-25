@@ -5,9 +5,15 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 #include <fcntl.h>
-#include "pen.h"
 #include "ssl.h"
+#include "client.h"
+#include "conn.h"
+#include "pen.h"
+#include "diag.h"
+#include "memory.h"
+#include "server.h"
 
 #ifdef HAVE_LIBSSL
 

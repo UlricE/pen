@@ -32,6 +32,8 @@
 #include <pwd.h>
 #include <errno.h>
 #include <ctype.h>
+#include "diag.h"
+#include "settings.h"
 
 #define PEN_MAX 1000	/* make that at least 1000 for prod */
 
@@ -46,8 +48,6 @@ static struct penlog {
 
 static int pen_n = 0;		/* next slot in buffer */
 
-static int debuglevel = 0;
-static int foreground = 0;
 static int unbuffer = 0;
 static char *logfile = NULL;
 static FILE *logfp;
@@ -58,45 +58,6 @@ static int pen_max = PEN_MAX;
 static char *user = NULL, *jail = NULL;
 
 static struct sigaction hupaction, termaction;
-
-static void debug(char *fmt, ...)
-{
-	time_t now;
-	struct tm *nowtm;
-	char nowstr[80];
-	char b[4096];
-	va_list ap;
-	va_start(ap, fmt);
-	vsnprintf(b, sizeof b, fmt, ap);
-	now=time(NULL);
-	nowtm = localtime(&now);
-	strftime(nowstr, sizeof(nowstr), "%Y-%m-%d %H:%M:%S", nowtm);
-	if (foreground) {
-		fprintf(stderr, "%s: %s\n", nowstr, b);
-	} else {
-		openlog("penlogd", LOG_CONS, LOG_USER);
-		syslog(LOG_DEBUG, "%s\n", b);
-		closelog();
-	}
-	va_end(ap);
-}
-
-static void error(char *fmt, ...)
-{
-	char b[4096];
-	va_list ap;
-	va_start(ap, fmt);
-	vsnprintf(b, sizeof b, fmt, ap);
-	if (foreground) {
-		fprintf(stderr, "%s\n", b);
-	} else {
-		openlog("penlogd", LOG_CONS, LOG_USER);
-		syslog(LOG_ERR, "%s\n", b);
-		closelog();
-	}
-	va_end(ap);
-	exit(1);
-}
 
 static void restart_log(int dummy)
 {
@@ -363,7 +324,7 @@ int main(int argc, char **argv)
 
 		if (n < 0) {
 			if (errno != EINTR)
-				perror("Error receiving data");
+				debug("Error receiving data: %s", strerror(errno));
 			continue;
 		}
 		b[n] = 0;

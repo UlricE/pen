@@ -89,6 +89,10 @@ AC_ARG_WITH(geoip, AS_HELP_STRING([--with-geoip], [use libgeoip]))
 AS_IF([test "$with_geoip" != "no"],
 	AC_CHECK_LIB([GeoIP], [GeoIP_country_code_by_addr]))
 
+AC_ARG_WITH(dsr, AS_HELP_STRING([--with-dsr], [enable direct server return]))
+AS_IF([test "$with_dsr" != "no"],
+	AC_CHECK_HEADERS([linux/if_packet.h]))
+
 docdir='${prefix}/doc/pen'
 AC_ARG_WITH(docdir,
 	[  --with-docdir=DIR       install docs in DIR [[PREFIX/doc/pen]]],

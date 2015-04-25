@@ -26,19 +26,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include "diag.h"
 
 #define MAXBUF 1024
-
-static void error(char *fmt, ...)
-{
-	char b[4096];
-	va_list ap;
-	va_start(ap, fmt);
-	vsnprintf(b, sizeof b, fmt, ap);
-	fprintf(stderr, "%s\n", b);
-	va_end(ap);
-	exit(EXIT_FAILURE);
-}
 
 int main(int argc, char **argv)
 {
@@ -83,7 +73,7 @@ int main(int argc, char **argv)
 			server->ai_addr, server->ai_addrlen);
 
 		if (n < 0) {
-			perror("Problem sending data");
+			debug("Problem sending data: %s", strerror(errno));
 		}
 	}
 

@@ -7,7 +7,10 @@
 /* because windows doesn't have it */
 #include <sys/select.h>
 #endif
-#include "pen.h"
+//#include "pen.h"
+#include "conn.h"
+#include "diag.h"
+#include "event.h"
 
 static fd_set w_read, w_write;
 static fd_set w_r_copy, w_w_copy;
@@ -60,8 +63,7 @@ static void select_event_wait(void)
 	err = socket_errno;
 	DEBUG(2, "select returns %d, socket_errno=%d", n, err);
         if (n < 0 && err != EINTR) {
-                perror("select");
-                error("Error on select");
+                error("Error on select: %s", strerror(errno));
         }
 }
 

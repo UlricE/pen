@@ -2,7 +2,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
-#include "pen.h"
+//#include "pen.h"
+#include "conn.h"
+#include "diag.h"
+#include "event.h"
+#include "memory.h"
 #ifdef HAVE_EPOLL
 #include <sys/epoll.h>
 
@@ -22,8 +26,7 @@ static void epoll_event_ctl(int fd, int events, int op)
 	ev.data.fd = fd;
 	n = epoll_ctl(efd, op, fd, &ev);
 	if (n == -1) {
-		perror("epoll_ctl");
-		abort();
+		error("epoll_ctl: %s", strerror(errno));
 	}
 }
 
@@ -57,8 +60,7 @@ static void epoll_event_wait(void)
         epoll_count = epoll_wait(efd, epoll_ev, maxevents, 1000*timeout);
 	DEBUG(2, "epoll_wait returns %d", epoll_count);
         if (epoll_count == -1 && errno != EINTR) {
-                perror("epoll_wait");
-                error("Error on epoll_wait");
+                error("Error on epoll_wait: %s", strerror(errno));
         }
 }
 
@@ -80,7 +82,7 @@ void epoll_init(void)
 	efd = epoll_create1(0);
 	DEBUG(2, "epoll_create1 returns %d", efd);
 	if (efd == -1) {
-		perror("epoll_create1");
+		debug("epoll_create1: %s", strerror(errno));
 		error("Error creating epoll fd");
 	}
 	maxevents = connections_max*2+2;

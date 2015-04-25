@@ -1,12 +1,16 @@
 #include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <errno.h>
-#include "pen.h"
+//#include "pen.h"
+#include "diag.h"
+#include "event.h"
+#include "memory.h"
 #ifdef HAVE_POLL
 #include <poll.h>
 
-struct pollfd *poll_ufds;
+static struct pollfd *poll_ufds;
 static int poll_nfds, poll_count, poll_nfds_max;
 static int pindex;
 
@@ -60,8 +64,7 @@ static void poll_event_wait(void)
         poll_count = poll(poll_ufds, poll_nfds, 1000*timeout);
 	DEBUG(2, "poll returns %d", poll_count);
         if (poll_count < 0 && errno != EINTR) {
-                perror("poll");
-                error("Error on poll");
+                error("Error on poll: %s", strerror(errno));
         }
 }
 
