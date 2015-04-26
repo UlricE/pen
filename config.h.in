@@ -55,6 +55,9 @@
 /* Define to 1 if you have the <ndir.h> header file, and it defines `DIR'. */
 #undef HAVE_NDIR_H
 
+/* Define to 1 if you have the <net/netmap_user.h> header file. */
+#undef HAVE_NET_NETMAP_USER_H
+
 /* #undef HAVE_POLL */
 #undef HAVE_POLL
 

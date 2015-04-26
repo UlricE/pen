@@ -1,4 +1,6 @@
 
+150427	Netmap support on FreeBSD.
+
 150424	Replaced all calls to perror with debug(..., strerror(errno);
 	Updated penlog and penlogd to use diag.[ch].
 

@@ -7,7 +7,7 @@
 #include "server.h"
 #include "settings.h"
 
-#ifdef HAVE_LINUX_IF_PACKET_H
+#if defined(HAVE_LINUX_IF_PACKET_H) || defined(HAVE_NET_NETMAP_USER_H)
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -19,9 +19,8 @@
 #include <sys/ioctl.h>
 #include <netinet/in.h>
 #include <net/if.h>
+#include <net/if_dl.h>
 #include <arpa/inet.h>
-#include <linux/if_packet.h>
-#include <netinet/ether.h>
 
 static char *mac2str(unsigned char *b)
 {
@@ -92,6 +91,117 @@ static struct in_addr *ipv4_dst_p;
 static struct in_addr our_ip_addr;
 static uint8_t our_hw_addr[6];
 
+/* OS specific features */
+#ifdef HAVE_LINUX_IF_PACKET
+#include <linux/if_packet.h>
+#include <netinet/ether.h>
+
+static int dsr_init_os(char *dsr_if)
+{
+	int n, ifindex;
+ 	struct ifreq ifr;
+	struct sockaddr_ll sll;
+ 	fd = socket_nb(AF_PACKET, SOCK_RAW, IPPROTO_RAW);
+
+	memset(&ifr, 0, sizeof ifr);
+
+	/* display mac */
+ 	strncpy(ifr.ifr_name, dsr_if, IFNAMSIZ-1);
+	n = ioctl(fd, SIOCGIFHWADDR, &ifr);
+	if (n == -1) debug("ioctl: %s", strerror(errno));
+	memcpy(our_hw_addr, ifr.ifr_hwaddr.sa_data, 6);
+	DEBUG(2, "Our hw addr: %s\n", mac2str(our_hw_addr));
+
+	/* display interface number */
+	ioctl(fd, SIOCGIFINDEX, &ifr);
+	ifindex = ifr.ifr_ifindex;
+	DEBUG(2, "Index = %d", ifindex);
+
+	/* bind to interface */
+	memset(&sll, 0, sizeof sll);
+	sll.sll_family = AF_PACKET;
+	sll.sll_ifindex = ifindex;
+	sll.sll_protocol = htons(ETH_P_ALL);
+	if (bind(fd, (struct sockaddr *)&sll, sizeof sll) == -1) {
+		error("bind: %s", strerror(errno));
+	}
+	return fd;
+}
+
+static int send_packet(int fd, const void *b, int len)
+{
+	int n = sendto(fd, b, len, 0, NULL, 0);
+	if (n == -1) {	/* fail */
+		DEBUG(2, "Can't send %d bytes: %s", len, strerror(errno));
+	}
+	return n;
+}
+
+static int recv_packet(int fd, void *buf)
+{
+	n = recvfrom(fd, buf, MAXBUF, 0, NULL, NULL);
+	DEBUG(2, "Received %d bytes", n);
+	return n;
+}
+
+#else	/* HAVE_NET_NETMAP_USER_H */
+#include <ifaddrs.h>
+#define NETMAP_WITH_LIBS
+#include <net/netmap_user.h>
+
+static struct nm_desc *d;
+
+static int dsr_init_os(char *dsr_if)
+{
+	int fd;
+	struct ifaddrs *ifa, *a;
+	struct sockaddr_dl *dl;
+	if (getifaddrs(&ifa)) {
+		error("Can't get list of interfaces: %s", strerror(errno));
+	}
+	for (a = ifa; a; a = a->ifa_next) {
+		if ((a->ifa_addr->sa_family == AF_LINK) &&
+		    (strcmp(a->ifa_name, dsr_if) == 0)) {
+			break;
+		}
+	}
+	if (a == NULL) {
+		error("Can't find interface %s", dsr_if);
+	}
+	dl = (struct sockaddr_dl *)a->ifa_addr;
+	memcpy(our_hw_addr, dl->sdl_data+dl->sdl_nlen, 6);
+	DEBUG(2, "Our hw addr: %s\n", mac2str(our_hw_addr));
+	char ifname[100];
+	snprintf(ifname, sizeof ifname, "netmap:%s", dsr_if);
+	d = nm_open(ifname, NULL, 0, 0);
+	fd = NETMAP_FD(d);
+	return fd;
+}
+
+static int send_packet(int fd, const void *b, int len)
+{
+	int n = nm_inject(d, b, len);
+	if (n == 0) {	/* fail */
+		DEBUG(2, "Can't send %d bytes", len);
+		return -1;
+	}
+	return n;
+}
+
+static int recv_packet(int fd, void *buf)
+{
+	int n;
+	struct nm_pkthdr h;
+	uint8_t *b = nm_nextpkt(d, &h);
+	if (b == NULL) return -1;
+	n = h.caplen;
+	DEBUG(2, "Received %d bytes", n);
+	memcpy(buf, b, n);
+	return n;
+}
+
+#endif
+
 /* returns a raw socket or -1 for failure */
 int dsr_init(char *dsr_if, char *listenport)
 {
@@ -101,9 +211,6 @@ int dsr_init(char *dsr_if, char *listenport)
 	mac_src_p = frame+6;
 	ethertype_p = frame+12;
 	payload = frame+14;
-	int n, ifindex, fd;
-	struct sockaddr_ll sll;
- 	struct ifreq ifr;
 	char *dsr_ip, *dsr_port;
 
 	/* arp packet structure */
@@ -133,32 +240,7 @@ int dsr_init(char *dsr_if, char *listenport)
 		return -1;
 	}
 
- 	fd = socket_nb(AF_PACKET, SOCK_RAW, IPPROTO_RAW);
-
-	memset(&ifr, 0, sizeof ifr);
-
-	/* display mac */
- 	strncpy(ifr.ifr_name, dsr_if, IFNAMSIZ-1);
-	n = ioctl(fd, SIOCGIFHWADDR, &ifr);
-	if (n == -1) debug("ioctl: %s", strerror(errno));
-	memcpy(our_hw_addr, ifr.ifr_hwaddr.sa_data, 6);
-	DEBUG(2, "Our hw addr: %s\n", mac2str(our_hw_addr));
-
-	/* display interface number */
-	ioctl(fd, SIOCGIFINDEX, &ifr);
-	ifindex = ifr.ifr_ifindex;
-	DEBUG(2, "Index = %d", ifindex);
-
-	/* bind to interface */
-	memset(&sll, 0, sizeof sll);
-	sll.sll_family = AF_PACKET;
-	sll.sll_ifindex = ifindex;
-	sll.sll_protocol = htons(ETH_P_ALL);
-	if (bind(fd, (struct sockaddr *)&sll, sizeof sll) == -1) {
-		debug("bind: %s", strerror(errno));
-	}
-
-	return fd;
+	return dsr_init_os(dsr_if);
 }
 
 void send_arp_request(int fd, struct in_addr *a)
@@ -177,11 +259,8 @@ void send_arp_request(int fd, struct in_addr *a)
 	memset(arp_tha_p, 0, 6);
 	memcpy(arp_tpa_p, a, 4);
 	hexdump(buf, 42);
-	n = sendto(fd, buf, 42, 0, NULL, 0);
-	DEBUG(2, "Sent %d bytes arp request", n);
-	if (n == -1) {
-		debug("sendto: %s", strerror(errno));
-	}
+	DEBUG(2, "Sending arp request");
+	n = send_packet(fd, buf, 42);
 }
 
 static void store_hwaddr(struct in_addr *ip, uint8_t *hw)
@@ -232,11 +311,8 @@ static void arp_frame(int fd, int n)
 		memcpy(arp_tpa_p, arp_sha_p, 4);
 		memcpy(arp_sha_p, our_hw_addr, 6);
 		memcpy(arp_spa_p, &our_ip_addr, 4);
-		n = sendto(fd, buf, n, 0, NULL, 0);
-		DEBUG(2, "Sent %d bytes", n);
-		if (n == -1) {
-			debug("sendto: %s", strerror(errno));
-		}
+		DEBUG(2, "Sending %d bytes", n);
+		n = send_packet(fd, buf, n);
 	} else if ((arp_htype == 1) &&
 		   (arp_ptype == 0x0800) &&
 		   (arp_oper == 2)) {
@@ -340,7 +416,7 @@ static int select_server(struct in_addr *a, uint16_t port)
 	return i;
 }
 
-static void ipv4_frame(int fd, int n)
+static int ipv4_frame(int fd, int n)
 {
 	uint8_t ipv4_protocol;
 	uint8_t ipv4_ihl;
@@ -367,23 +443,21 @@ static void ipv4_frame(int fd, int n)
 		server = select_server(ipv4_src_p, tcp_src_port);
 		if (server == -1) {
 			debug("Dropping frame, nowhere to put it");
-			return;
+			return -1;
 		}
 		if (!real_hw_known(server)) {
 			DEBUG(2, "Real hw addr unknown");
-			return;
+			return -1;
 		}
 		DEBUG(2, "Source port = %d, destination port = %d",
 			tcp_src_port, tcp_dst_port);
 		if (port == 0 || tcp_dst_port == port) {
 			memcpy(mac_dst_p, servers[server].hwaddr, 6);
-			n = sendto(fd, buf, n, 0, NULL, 0);
-			DEBUG(2, "Sent %d bytes", n);
-			if (n == -1) {
-				debug("sendto: %s", strerror(errno));
-			}
+			DEBUG(2, "Sending %d bytes", n);
+			n = send_packet(fd, buf, n);
 		}
 	}
+	return 0;
 }
 
 void dsr_arp(int fd)
@@ -414,30 +488,47 @@ void dsr_arp(int fd)
 	}
 }
 
+
 void dsr_frame(int fd)
 {
 	int i, type, n;
+	static int dirty_bytes = 0;
+
+	if (dirty_bytes) {
+		DEBUG(2, "Retrying transmission of %d bytes", dirty_bytes);
+		n = send_packet(fd, buf, dirty_bytes);
+		if (n == -1) {
+			DEBUG(2, "Failed again, discarding packet");
+		}
+	}
 
 	for (i = 0; i < multi_accept; i++) {
-		n = recvfrom(fd, buf, MAXBUF, 0, NULL, NULL);
-		DEBUG(2, "Received %d bytes", n);
-		if (n == -1) return;
-
+		dirty_bytes = recv_packet(fd, buf);
+		if (dirty_bytes == -1) {
+			dirty_bytes = 0;
+			break;
+		}
 		DEBUG(2, "MAC destination: %s", mac2str(mac_dst_p));
 		DEBUG(2, "MAC source: %s", mac2str(mac_src_p));
 		type = ntohs(*ethertype_p);
 		DEBUG(2, "EtherType: %s", type2str(type));
 		switch (type) {
 		case 0x0806:
-			arp_frame(fd, n);
+			arp_frame(fd, dirty_bytes);
 			break;
 		case 0x0800:
-			ipv4_frame(fd, n);
+			if (ipv4_frame(fd, dirty_bytes) == -1) {
+				DEBUG(2, "Couldn't process frame, retry later");
+				goto End;
+			}
 			break;
 		default:
 			DEBUG(2, "Other (%x)", type);
 		}
+		dirty_bytes = 0;
 	}
+End:
+	DEBUG(2, "Processed %d frames, %d bytes remaining", i, dirty_bytes);
 }
 
 #else

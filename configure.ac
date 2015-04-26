@@ -91,7 +91,8 @@ AS_IF([test "$with_geoip" != "no"],
 
 AC_ARG_WITH(dsr, AS_HELP_STRING([--with-dsr], [enable direct server return]))
 AS_IF([test "$with_dsr" != "no"],
-	AC_CHECK_HEADERS([linux/if_packet.h]))
+	AC_CHECK_HEADERS([linux/if_packet.h])
+	AC_CHECK_HEADERS([net/netmap_user.h]))
 
 docdir='${prefix}/doc/pen'
 AC_ARG_WITH(docdir,
