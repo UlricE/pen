@@ -1,5 +1,6 @@
 
-150427	Netmap support on FreeBSD.
+150427	DSR support using Netmap on FreeBSD.
+	Unbroke DSR on Linux.
 
 150424	Replaced all calls to perror with debug(..., strerror(errno);
 	Updated penlog and penlogd to use diag.[ch].

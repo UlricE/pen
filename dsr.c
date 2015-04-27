@@ -19,7 +19,6 @@
 #include <sys/ioctl.h>
 #include <netinet/in.h>
 #include <net/if.h>
-#include <net/if_dl.h>
 #include <arpa/inet.h>
 
 static char *mac2str(unsigned char *b)
@@ -92,13 +91,13 @@ static struct in_addr our_ip_addr;
 static uint8_t our_hw_addr[6];
 
 /* OS specific features */
-#ifdef HAVE_LINUX_IF_PACKET
+#ifdef HAVE_LINUX_IF_PACKET_H
 #include <linux/if_packet.h>
 #include <netinet/ether.h>
 
 static int dsr_init_os(char *dsr_if)
 {
-	int n, ifindex;
+	int fd, n, ifindex;
  	struct ifreq ifr;
 	struct sockaddr_ll sll;
  	fd = socket_nb(AF_PACKET, SOCK_RAW, IPPROTO_RAW);
@@ -139,12 +138,13 @@ static int send_packet(int fd, const void *b, int len)
 
 static int recv_packet(int fd, void *buf)
 {
-	n = recvfrom(fd, buf, MAXBUF, 0, NULL, NULL);
+	int n = recvfrom(fd, buf, MAXBUF, 0, NULL, NULL);
 	DEBUG(2, "Received %d bytes", n);
 	return n;
 }
 
 #else	/* HAVE_NET_NETMAP_USER_H */
+#include <net/if_dl.h>
 #include <ifaddrs.h>
 #define NETMAP_WITH_LIBS
 #include <net/netmap_user.h>
@@ -245,7 +245,6 @@ int dsr_init(char *dsr_if, char *listenport)
 
 void send_arp_request(int fd, struct in_addr *a)
 {
-	int n;
 	memset(mac_dst_p, 0xff, 6);
 	memcpy(mac_src_p, our_hw_addr, 6);
 	*ethertype_p = htons(0x0806);
@@ -260,7 +259,7 @@ void send_arp_request(int fd, struct in_addr *a)
 	memcpy(arp_tpa_p, a, 4);
 	hexdump(buf, 42);
 	DEBUG(2, "Sending arp request");
-	n = send_packet(fd, buf, 42);
+	send_packet(fd, buf, 42);
 }
 
 static void store_hwaddr(struct in_addr *ip, uint8_t *hw)
