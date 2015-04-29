@@ -3,6 +3,8 @@
 #include <openssl/err.h>
 #endif
 
+#include <time.h>
+
 #define CONNECTIONS_MAX	500	/* max simultaneous connections */
 
 /* Connection states, as used in struct conn */
