@@ -1,3 +1,4 @@
+#include <time.h>
 #ifdef HAVE_LIBSSL
 #include <openssl/ssl.h>
 #include <openssl/err.h>
