@@ -1702,7 +1702,9 @@ static void add_client(int downfd, struct sockaddr_storage *cli_addr)
 #ifdef HAVE_LIBSSL
 	conn = store_conn(downfd, ssl, client);
 	conns[conn].reneg = 0;	/* never */
-	SSL_set_app_data(ssl, &conns[conn]);
+	if (ssl) {
+		SSL_set_app_data(ssl, &conns[conn]);
+	}
 #else
 	conn = store_conn(downfd, client);
 #endif
