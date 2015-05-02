@@ -4,6 +4,7 @@
 #include <errno.h>
 #include "pen.h"
 #include "diag.h"
+#include "memory.h"
 #include "server.h"
 #include "settings.h"
 
@@ -56,38 +57,36 @@ static void hexdump(uint8_t *b, int n)
 
 	for (i = 0; i < n; i++) {
 		printf("%02x ", b[i]);
-		if ((i % 4) == 3) printf("\n");
+		if ((i % 8) == 7) printf("\n");
 	}
-	if (i % 4) printf("\n");
+	if (i % 8) printf("\n");
 }
 
 #define MAXBUF 32000
 
+#define MAC_DST(f) (uint8_t *)(f)
+#define MAC_SRC(f) (uint8_t *)(f+6)
+#define ETHERTYPE(f) (uint16_t *)(f+12)
+#define PAYLOAD(f) (f+14)
+#define ARP_HTYPE(f) (uint16_t *)(PAYLOAD(f))
+#define ARP_PTYPE(f) (uint16_t *)(PAYLOAD(f)+2)
+#define ARP_HLEN(f) (uint8_t *)(PAYLOAD(f)+4)
+#define ARP_PLEN(f) (uint8_t *)(PAYLOAD(f)+5)
+#define ARP_OPER(f) (uint16_t *)(PAYLOAD(f)+6)
+#define ARP_SHA(f) (uint8_t *)(PAYLOAD(f)+8)
+#define ARP_SPA(f) (struct in_addr *)(PAYLOAD(f)+14)
+#define ARP_THA(f) (uint8_t *)(PAYLOAD(f)+18)
+#define ARP_TPA(f) (struct in_addr *)(PAYLOAD(f)+24)
+#define IPV4_IHL(f) (uint8_t *)(PAYLOAD(f))
+#define IPV4_PROTOCOL(f) (uint8_t *)(PAYLOAD(f)+9)
+#define IPV4_SRC(f) (struct in_addr *)(PAYLOAD(f)+12)
+#define IPV4_DST(f) (struct in_addr *)(PAYLOAD(f)+16)
+
 static int port;
 
-static void *frame, *payload;
 static uint8_t *buf;
-static uint8_t *mac_dst_p;
-static uint8_t *mac_src_p;
-static uint16_t *ethertype_p;
-
-/* arp packet structure */
-static uint16_t *arp_htype_p;
-static uint16_t *arp_ptype_p;
-static uint8_t *arp_hlen_p;
-static uint8_t *arp_plen_p;
-static uint16_t *arp_oper_p;
-static uint8_t *arp_sha_p;        /* sender hardware address */
-static struct in_addr *arp_spa_p; /* sender protocol address */
-static uint8_t *arp_tha_p;        /* target hardware address */
-static struct in_addr *arp_tpa_p; /* target protocol address */
-
-/* ipv4 packet structure */
-static uint8_t *ipv4_ihl_p;
-static uint8_t *ipv4_protocol_p;
-static struct in_addr *ipv4_src_p;
-static struct in_addr *ipv4_dst_p;
 static struct in_addr our_ip_addr;
+
 static uint8_t our_hw_addr[6];
 
 /* OS specific features */
@@ -102,6 +101,7 @@ static int dsr_init_os(char *dsr_if)
 	struct sockaddr_ll sll;
  	fd = socket_nb(AF_PACKET, SOCK_RAW, IPPROTO_RAW);
 
+	buf = pen_malloc(MAXBUF);
 	memset(&ifr, 0, sizeof ifr);
 
 	/* display mac */
@@ -143,7 +143,13 @@ static int recv_packet(int fd, void *buf)
 	return n;
 }
 
+static int max_pkts(void)
+{
+	return multi_accept;
+}
+
 #else	/* HAVE_NET_NETMAP_USER_H */
+
 #include <net/if_dl.h>
 #include <ifaddrs.h>
 #define NETMAP_WITH_LIBS
@@ -174,7 +180,10 @@ static int dsr_init_os(char *dsr_if)
 	char ifname[100];
 	snprintf(ifname, sizeof ifname, "netmap:%s", dsr_if);
 	d = nm_open(ifname, NULL, 0, 0);
+	DEBUG(2, "first_tx_ring = %d, last_tx_ring = %d, first_rx_ring = %d, last_rx_ring = %d",
+	d->first_tx_ring, d->last_tx_ring, d->first_rx_ring, d->last_rx_ring);
 	fd = NETMAP_FD(d);
+	buf = pen_malloc(MAXBUF);
 	return fd;
 }
 
@@ -200,35 +209,25 @@ static int recv_packet(int fd, void *buf)
 	return n;
 }
 
+static int max_pkts(void)
+{
+	int in, out, m;
+
+	m = multi_accept;
+	in = nm_ring_space(NETMAP_RXRING(d->nifp, 0));
+	if (in < m) m = in;
+	out = nm_ring_space(NETMAP_TXRING(d->nifp, 0));
+	if (out < m) m = out;
+	DEBUG(3, "multi_accept = %d, in = %d, out = %d => m = %d", multi_accept, in, out, m);
+	return m;
+}
+
 #endif
 
 /* returns a raw socket or -1 for failure */
 int dsr_init(char *dsr_if, char *listenport)
 {
-	buf = malloc(MAXBUF);
-	frame = buf;
-	mac_dst_p = frame;
-	mac_src_p = frame+6;
-	ethertype_p = frame+12;
-	payload = frame+14;
 	char *dsr_ip, *dsr_port;
-
-	/* arp packet structure */
-	arp_htype_p = payload;
-	arp_ptype_p = payload+2;
-	arp_hlen_p = payload+4;
-	arp_plen_p = payload+5;
-	arp_oper_p = payload+6;
-	arp_sha_p = payload+8;
-	arp_spa_p = payload+14;
-	arp_tha_p = payload+18;
-	arp_tpa_p = payload+24;
-
-	/* ipv4 packet structure */
-	ipv4_ihl_p = payload;
-	ipv4_protocol_p = payload+9;
-	ipv4_src_p = payload+12;
-	ipv4_dst_p = payload+16;
 
 	dsr_ip = strtok(listenport, ":");
 	dsr_port = strtok(NULL, ":");
@@ -245,18 +244,19 @@ int dsr_init(char *dsr_if, char *listenport)
 
 void send_arp_request(int fd, struct in_addr *a)
 {
-	memset(mac_dst_p, 0xff, 6);
-	memcpy(mac_src_p, our_hw_addr, 6);
-	*ethertype_p = htons(0x0806);
-	*arp_htype_p = htons(1);
-	*arp_ptype_p = htons(0x0800);
-	*arp_hlen_p = 6;
-	*arp_plen_p = 4;
-	*arp_oper_p = htons(1);
-	memcpy(arp_sha_p, our_hw_addr, 6);
-	memset(arp_spa_p, 0, 4);
-	memset(arp_tha_p, 0, 6);
-	memcpy(arp_tpa_p, a, 4);
+debug("MAC_DST(%p) = %p", buf, MAC_DST(buf));
+	memset(MAC_DST(buf), 0xff, 6);
+	memcpy(MAC_SRC(buf), our_hw_addr, 6);
+	*ETHERTYPE(buf) = htons(0x0806);
+	*ARP_HTYPE(buf) = htons(1);
+	*ARP_PTYPE(buf) = htons(0x0800);
+	*ARP_HLEN(buf) = 6;
+	*ARP_PLEN(buf) = 4;
+	*ARP_OPER(buf) = htons(1);
+	memcpy(ARP_SHA(buf), our_hw_addr, 6);
+	memset(ARP_SPA(buf), 0, 4);
+	memset(ARP_THA(buf), 0, 6);
+	memcpy(ARP_TPA(buf), a, 4);
 	hexdump(buf, 42);
 	DEBUG(2, "Sending arp request");
 	send_packet(fd, buf, 42);
@@ -283,9 +283,9 @@ static void arp_frame(int fd, int n)
 {
 	uint16_t arp_htype, arp_ptype, arp_oper;
 	DEBUG(2, "ARP");
-	arp_htype = ntohs(*arp_htype_p);
-	arp_ptype = ntohs(*arp_ptype_p);
-	arp_oper = ntohs(*arp_oper_p);
+	arp_htype = ntohs(*ARP_HTYPE(buf));
+	arp_ptype = ntohs(*ARP_PTYPE(buf));
+	arp_oper = ntohs(*ARP_OPER(buf));
 	DEBUG(2, "Hardware type: %d / %s", arp_htype,
 		arp_htype == 1 ? "Ethernet" : "Other");
 	DEBUG(2, "Protocol type: 0x%x / %s", arp_ptype,
@@ -293,29 +293,29 @@ static void arp_frame(int fd, int n)
 	DEBUG(2, "Operation: %d / %s", arp_oper,
 		arp_oper == 1 ? "Request" : "Reply");
 
-	DEBUG(2, "Sender hardware address: %s", mac2str(arp_sha_p));
-	DEBUG(2, "Sender protocol address: %s", inet_ntoa(*arp_spa_p));
-	DEBUG(2, "Target hardware address: %s", mac2str(arp_tha_p));
-	DEBUG(2, "Target protocol address: %s", inet_ntoa(*arp_tpa_p));
+	DEBUG(2, "Sender hardware address: %s", mac2str(ARP_SHA(buf)));
+	DEBUG(2, "Sender protocol address: %s", inet_ntoa(*ARP_SPA(buf)));
+	DEBUG(2, "Target hardware address: %s", mac2str(ARP_THA(buf)));
+	DEBUG(2, "Target protocol address: %s", inet_ntoa(*ARP_TPA(buf)));
 	if ((arp_htype == 1) &&
 	    (arp_ptype == 0x0800) &&
 	    (arp_oper == 1) &&
-	    (memcmp(arp_tpa_p, &our_ip_addr, sizeof *arp_tpa_p) == 0)) {
+	    (memcmp(ARP_TPA(buf), &our_ip_addr, sizeof *ARP_TPA(buf)) == 0)) {
 		hexdump(buf, n);
 		DEBUG(2, "We should reply to this.");
-		memcpy(mac_dst_p, arp_sha_p, 6);
-		memcpy(mac_src_p, our_hw_addr, 6);
-		*arp_oper_p = htons(2);
-		memcpy(arp_tha_p, arp_sha_p, 6);
-		memcpy(arp_tpa_p, arp_sha_p, 4);
-		memcpy(arp_sha_p, our_hw_addr, 6);
-		memcpy(arp_spa_p, &our_ip_addr, 4);
+		memcpy(MAC_DST(buf), ARP_SHA(buf), 6);
+		memcpy(MAC_SRC(buf), our_hw_addr, 6);
+		*ARP_OPER(buf) = htons(2);
+		memcpy(ARP_THA(buf), ARP_SHA(buf), 6);
+		memcpy(ARP_TPA(buf), ARP_SPA(buf), 4);
+		memcpy(ARP_SHA(buf), our_hw_addr, 6);
+		memcpy(ARP_SPA(buf), &our_ip_addr, 4);
 		DEBUG(2, "Sending %d bytes", n);
 		n = send_packet(fd, buf, n);
 	} else if ((arp_htype == 1) &&
 		   (arp_ptype == 0x0800) &&
 		   (arp_oper == 2)) {
-		store_hwaddr(arp_spa_p, arp_sha_p);
+		store_hwaddr(ARP_SPA(buf), ARP_SHA(buf));
 	}
 }
 
@@ -380,7 +380,7 @@ static int rebuild_hash_index(void)
 		t--;
 	}
 
-#if 1
+#if 0
 for (i = 0; i < HASH_INDEX_SIZE; i++) {
 printf("%d ", hash_index[i]);
 }
@@ -415,31 +415,30 @@ static int select_server(struct in_addr *a, uint16_t port)
 	return i;
 }
 
+#define TCP_SEGMENT(f, i) (PAYLOAD(f)+i)
+#define TCP_SRC_PORT(f, i) (uint16_t *)(TCP_SEGMENT(f, i))
+#define TCP_DST_PORT(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+2)
+
 static int ipv4_frame(int fd, int n)
 {
 	uint8_t ipv4_protocol;
 	uint8_t ipv4_ihl;
-	void *tcp_segment;
-	uint16_t *tcp_src_port_p, *tcp_dst_port_p;
 	uint16_t tcp_src_port, tcp_dst_port;
 	int server;
 
 	DEBUG(2, "IPv4");
-	ipv4_ihl = ((*ipv4_ihl_p) & 0xf)*4;
-	ipv4_protocol = *ipv4_protocol_p;
+	ipv4_ihl = ((*IPV4_IHL(buf)) & 0xf)*4;
+	ipv4_protocol = *IPV4_PROTOCOL(buf);
 	DEBUG(2, "IPv4 header size: %d bytes", ipv4_ihl);
 	DEBUG(2, "Protocol: %d / %s", ipv4_protocol, proto2str(ipv4_protocol));
-	DEBUG(2, "Sender IPv4 address: %s", inet_ntoa(*ipv4_src_p));
-	DEBUG(2, "Destination IPv4 address: %s", inet_ntoa(*ipv4_dst_p));
+	DEBUG(2, "Sender IPv4 address: %s", inet_ntoa(*IPV4_SRC(buf)));
+	DEBUG(2, "Destination IPv4 address: %s", inet_ntoa(*IPV4_DST(buf)));
 	if ((ipv4_protocol == 6) &&
-	    (*(uint32_t *)ipv4_dst_p == (uint32_t)our_ip_addr.s_addr)) {
+	    (*(uint32_t *)IPV4_DST(buf) == (uint32_t)our_ip_addr.s_addr)) {
 		DEBUG(2, "We should forward this.");
-		tcp_segment = payload+ipv4_ihl;
-		tcp_src_port_p = tcp_segment;
-		tcp_dst_port_p = tcp_segment+2;
-		tcp_src_port = htons(*tcp_src_port_p);
-		tcp_dst_port = htons(*tcp_dst_port_p);
-		server = select_server(ipv4_src_p, tcp_src_port);
+		tcp_src_port = htons(*TCP_SRC_PORT(buf, ipv4_ihl));
+		tcp_dst_port = htons(*TCP_DST_PORT(buf, ipv4_ihl));
+		server = select_server(IPV4_SRC(buf), tcp_src_port);
 		if (server == -1) {
 			debug("Dropping frame, nowhere to put it");
 			return -1;
@@ -451,7 +450,7 @@ static int ipv4_frame(int fd, int n)
 		DEBUG(2, "Source port = %d, destination port = %d",
 			tcp_src_port, tcp_dst_port);
 		if (port == 0 || tcp_dst_port == port) {
-			memcpy(mac_dst_p, servers[server].hwaddr, 6);
+			memcpy(MAC_DST(buf), servers[server].hwaddr, 6);
 			DEBUG(2, "Sending %d bytes", n);
 			n = send_packet(fd, buf, n);
 		}
@@ -490,26 +489,29 @@ void dsr_arp(int fd)
 
 void dsr_frame(int fd)
 {
-	int i, type, n;
+	int i, type, n, limit;
 	static int dirty_bytes = 0;
 
 	if (dirty_bytes) {
-		DEBUG(2, "Retrying transmission of %d bytes", dirty_bytes);
+		DEBUG(1, "Retrying transmission of %d bytes", dirty_bytes);
 		n = send_packet(fd, buf, dirty_bytes);
 		if (n == -1) {
 			DEBUG(2, "Failed again, discarding packet");
 		}
 	}
 
-	for (i = 0; i < multi_accept; i++) {
+	limit = max_pkts();
+//debug("Forwarding %d packets", limit);
+
+	for (i = 0; i < limit; i++) {
 		dirty_bytes = recv_packet(fd, buf);
 		if (dirty_bytes == -1) {
 			dirty_bytes = 0;
 			break;
 		}
-		DEBUG(2, "MAC destination: %s", mac2str(mac_dst_p));
-		DEBUG(2, "MAC source: %s", mac2str(mac_src_p));
-		type = ntohs(*ethertype_p);
+		DEBUG(2, "MAC destination: %s", mac2str(MAC_DST(buf)));
+		DEBUG(2, "MAC source: %s", mac2str(MAC_SRC(buf)));
+		type = ntohs(*ETHERTYPE(buf));
 		DEBUG(2, "EtherType: %s", type2str(type));
 		switch (type) {
 		case 0x0806:
