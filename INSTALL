@@ -4,6 +4,7 @@ Installing Pen
 
 To compile and install using all defaults, type:
 
+./bootstrap.sh
 ./configure
 make
 make install
