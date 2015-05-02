@@ -2,12 +2,24 @@
 Installing Pen
 ==============
 
+Option 1. Installing from a source tarball
+
 To compile and install using all defaults, type:
+
+./configure
+make
+make install
+
+See also https://github.com/UlricE/pen/wiki/Building-Pen-from-Source
+
+Option 2. Installing from Git
 
 ./bootstrap.sh
 ./configure
 make
 make install
+
+See also https://github.com/UlricE/pen/wiki/Building-Pen-from-Git
 
 
 Options
