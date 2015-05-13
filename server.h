@@ -1,5 +1,9 @@
 #include <stdint.h>
+#ifndef WINDOWS
 #include <sys/socket.h>
+#else
+#include <winsock2.h>
+#endif
 
 #define ALG_HASH_VALID 1
 #define ALG_ROUNDROBIN 2

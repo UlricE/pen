@@ -2,7 +2,11 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <time.h>
+#ifndef WINDOWS
 #include <syslog.h>
+#else
+#include "windows.h"
+#endif
 #include "settings.h"
 
 int debuglevel;

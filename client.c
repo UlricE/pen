@@ -1,6 +1,8 @@
 #include "config.h"
 #include <string.h>
+#ifndef WINDOWS
 #include <netinet/in.h>
+#endif
 #include "client.h"
 #include "conn.h"
 #include "diag.h"

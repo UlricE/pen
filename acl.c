@@ -2,9 +2,13 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#ifdef WINDOWS
+#include <winsock2.h>
+#else
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#endif
 #ifdef HAVE_LIBGEOIP
 #include <GeoIP.h>
 GeoIP *geoip4, *geoip6;
@@ -14,6 +18,7 @@ GeoIP *geoip4, *geoip6;
 #include "diag.h"
 #include "memory.h"
 #include "netconv.h"
+#include "windows.h"
 
 #define ACE_IPV4 (1)
 #define ACE_IPV6 (2)

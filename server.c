@@ -4,7 +4,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
+#ifndef WINDOWS
 #include <netinet/in.h>
+#endif
 #ifdef HAVE_LIBSSL
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -20,6 +22,7 @@
 #include "pen.h"
 #include "server.h"
 #include "settings.h"
+#include "windows.h"
 
 #ifndef WINDOWS
 #define CONNECT_IN_PROGRESS (EINPROGRESS)
@@ -274,7 +277,7 @@ int try_server(int index, int conn)
 	upfd = socket_nb(addr->ss_family, protoid, 0);
 
 	if (keepalive) {
-		setsockopt(upfd, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof optval);
+		setsockopt(upfd, SOL_SOCKET, SO_KEEPALIVE, (void *)&optval, sizeof optval);
 	}
 
 	if (debuglevel > 1) {

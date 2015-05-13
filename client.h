@@ -1,5 +1,9 @@
 #include <time.h>
+#ifndef WINDOWS
 #include <sys/socket.h>
+#else
+#include <winsock2.h>
+#endif
 
 #define CLIENTS_MAX	2048	/* max clients */
 #define TRACKING_TIME	0	/* how long a client is remembered */

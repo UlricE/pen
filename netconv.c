@@ -4,12 +4,19 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
+#ifdef WINDOWS
+#include <winsock2.h>
+#include <ws2ipdef.h>
+#include <ws2tcpip.h>
+#else
 #include <sys/socket.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/un.h>
+#endif
 #include "diag.h"
+#include "windows.h"
 
 /* return port number in host byte order */
 int getport(char *p, char *proto)

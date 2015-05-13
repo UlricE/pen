@@ -3,7 +3,7 @@
 #include "pen_epoll.h"
 #include "pen_kqueue.h"
 #include "pen_poll.h"
-#include "pen_epoll.h"
+#include "pen_select.h"
 
 int timeout = TIMEOUT;
 

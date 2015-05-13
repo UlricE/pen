@@ -3,6 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#ifdef WINDOWS
+#include <winsock2.h>
+#endif
 #if defined HAVE_SYS_SELECT_H && !defined WINDOWS
 /* because windows doesn't have it */
 #include <sys/select.h>

@@ -1,6 +1,8 @@
 #include "config.h"
 #include <stdlib.h>
+#ifndef WINDOWS
 #include <sys/socket.h>
+#endif
 #include <unistd.h>
 #include "conn.h"
 #include "client.h"

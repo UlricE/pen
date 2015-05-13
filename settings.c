@@ -1,5 +1,9 @@
 #include "config.h"
+#ifndef WINDOWS
 #include <sys/socket.h>
+#else
+#include <winsock2.h>
+#endif
 
 int foreground;
 int abort_on_error = 0;

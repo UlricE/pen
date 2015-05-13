@@ -1,11 +1,19 @@
+#include "diag.h"
 #include "pen.h"
+#include "windows.h"
 
-static int sigaction(int signum, const struct sigaction *act,
+int sigaction(int signum, const struct sigaction *act,
 		struct sigaction *oldact)
 {
 	return 0;
 }
 
+uid_t getuid(void)
+{
+	return 0;
+}
+
+#if 0
 static int sigemptyset(sigset_t *set)
 {
 	return 0;
@@ -17,11 +25,6 @@ static int getrlimit(int resource, struct rlimit *rlim)
 }
 
 static int setrlimit(int resource, const struct rlimit *rlim)
-{
-	return 0;
-}
-
-static uid_t getuid(void)
 {
 	return 0;
 }
@@ -48,6 +51,7 @@ static int setuid(uid_t uid)
 {
 	return 0;
 }
+#endif
 
 int inet_aton(const char *cp, struct in_addr *addr)
 {
@@ -55,7 +59,21 @@ int inet_aton(const char *cp, struct in_addr *addr)
 	return (addr->s_addr == INADDR_NONE) ? 0 : 1;
 }
 
-static void make_nonblocking(int fd)
+const char *inet_ntop(int af, const void *src, char *dst, socklen_t size)
+{
+	struct sockaddr_in sa;
+	memset(&sa, 0, sizeof sa);
+	memcpy(&sa.sin_addr, src, sizeof sa.sin_addr);
+	sa.sin_family = af;
+	if (WSAAddressToString((struct sockaddr *)&sa, sizeof sa, 0, dst, (LPDWORD)&size) != 0) {
+		DWORD rv = WSAGetLastError();
+		debug("WSAAddressToString returns %d", rv);
+		return NULL;
+	}
+	return dst;
+}
+
+void make_nonblocking(int fd)
 {
 	int i;
 	u_long mode = 1;
@@ -66,7 +84,7 @@ static void make_nonblocking(int fd)
 static WSADATA wsaData;
 static int ws_started = 0;
 
-static int start_winsock(void)
+int start_winsock(void)
 {
 	int n;
 	DEBUG(1, "start_winsock()");
@@ -82,7 +100,7 @@ static int start_winsock(void)
 	return ws_started;
 }
 
-static void stop_winsock(void)
+void stop_winsock(void)
 {
 	WSACleanup();
 	ws_started = 0;

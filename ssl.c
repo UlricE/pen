@@ -1,4 +1,7 @@
 #include "config.h"
+
+#ifdef HAVE_LIBSSL
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -14,8 +17,6 @@
 #include "diag.h"
 #include "memory.h"
 #include "server.h"
-
-#ifdef HAVE_LIBSSL
 
 char ssl_compat;
 char require_peer_cert;

@@ -1,4 +1,12 @@
+#ifndef WINDOWS
 #include <netinet/in.h>
+#else
+#include <winsock2.h>
+#include <ws2ipdef.h>
+#ifndef INET6_ADDRSTRLEN
+#define INET6_ADDRSTRLEN 46
+#endif
+#endif
 
 #define ACLS_MAX	10	/* max acls */
 

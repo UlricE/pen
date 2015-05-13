@@ -1,4 +1,6 @@
 
+150513	Numerous updates to support the madness that is Windows.
+
 150427	DSR support using Netmap on FreeBSD.
 	Unbroke DSR on Linux.
 

@@ -20,6 +20,7 @@
 #include "config.h"
 
 #include <stdio.h>
+#include <inttypes.h>
 #include <ctype.h>
 #include <errno.h>
 #include <sys/types.h>
@@ -87,8 +88,10 @@ static int exit_enabled = 0;
 
 static int hupcounter = 0;
 
+#ifndef WINDOWS
 static int stats_flag = 0;
 static int restart_log_flag = 0;
+#endif
 static int http = 0;
 
 static char *cfgfile = NULL;
@@ -148,7 +151,7 @@ static void tcp_nodelay_on(int s)
 {
 #ifdef TCP_NODELAY
 	int one = 1;
-	int n = setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+	int n = setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (void *)&one, sizeof one);
 	DEBUG(2, "setsockopt(%d, %d, %d, %p, %d) returns %d",
 		s, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one, n);
 #else
@@ -190,7 +193,9 @@ static int accept_nb(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
 	if (tcp_nodelay) tcp_nodelay_on(sockfd);
 }
 
+#ifndef WINDOWS
 static struct sigaction alrmaction, hupaction, termaction, usr1action, usr2action;
+#endif
 
 static int pen_strncasecmp(const char *p, const char *q, size_t n)
 {
@@ -272,8 +277,13 @@ static int webstats(void)
 			"<td>%d</td>\n"
 			"<td>%d</td>\n"
 			"<td>%d</td>\n"
+#if 0
 			"<td>%llu</td>\n"
 			"<td>%llu</td>\n"
+#else
+			"<td>%" PRIu64 "</td>\n"
+			"<td>%" PRIu64 "</td>\n"
+#endif
 			"<td>%d</td>\n"
 			"<td>%d</td>\n"
 			"</tr>\n",
@@ -307,8 +317,13 @@ static int webstats(void)
 			"<td>%ld</td>\n"
 			"<td>%d</td>\n"
 			"<td>%ld</td>\n"
+#if 0
 			"<td>%lld</td>\n"
 			"<td>%lld</td>\n"
+#else
+			"<td>%" PRIu64 "</td>\n"
+			"<td>%" PRIu64 "</td>\n"
+#endif
 			"</tr>\n",
 			i, pen_ntoa(&clients[i].addr),
 			(long)(now-clients[i].last), clients[i].server, clients[i].connects,
@@ -354,6 +369,7 @@ static int webstats(void)
 	return 1;
 }
 
+#ifndef WINDOWS
 static void textstats(void)
 {
 	int i;
@@ -408,7 +424,6 @@ static void textstats(void)
 	}
 }
 
-
 static void stats(int dummy)
 {
 	DEBUG(1, "Caught USR1, will save stats");
@@ -422,6 +437,7 @@ static void restart_log(int dummy)
 	restart_log_flag=1;
 	sigaction(SIGHUP, &hupaction, NULL);
 }
+#endif
 
 static void quit(int dummy)
 {
@@ -429,10 +445,12 @@ static void quit(int dummy)
 	loopflag = 0;
 }
 
+#ifndef WINDOWS
 static void die(int dummy)
 {
 	abort();
 }
+#endif
 
 static void dump(unsigned char *p, int n)
 {
@@ -769,7 +787,7 @@ static int copy_down(int i)
 			struct sockaddr_storage *ss = &clients[conns[i].client].addr;
 			socklen_t sss = pen_ss_size(ss);
 			DEBUG(2, "copy_down sending %d bytes to socket %d", rc, to);
-			n = sendto(to, b, rc, 0, (struct sockaddr *)ss, sss);
+			n = sendto(to, (void *)b, rc, 0, (struct sockaddr *)ss, sss);
 			close_conn(i);
 			return 0;
 		}
@@ -814,10 +832,12 @@ static int copy_down(int i)
 	return 0;
 }
 
+#ifndef WINDOWS
 static void alarm_handler(int dummy)
 {
 	DEBUG(2, "alarm_handler(%d)", dummy);
 }
+#endif
 
 
 static void usage(void)
@@ -1093,8 +1113,8 @@ static int open_listener(char *a)
 	listenfd = socket_nb(ss.ss_family, protoid, 0);
 	DEBUG(2, "local address=[%s:%d]", b, port);
 
-	setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (char *)&one, sizeof one);
-	setsockopt(listenfd, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof optval);
+	setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (void *)&one, sizeof one);
+	setsockopt(listenfd, SOL_SOCKET, SO_KEEPALIVE, (void *)&optval, sizeof optval);
 
 	if (bind(listenfd, (struct sockaddr *)&ss, pen_ss_size(&ss)) < 0) {
 		error("can't bind local address");
@@ -1231,10 +1251,25 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 				} else {
 					ma = "128";
 				}
+#if 0
 				if (inet_pton(AF_INET6, ip, ipaddr) != 1) {
 					debug("acl: can't convert address %s", ip);
 					return;
 				}
+#else
+				struct sockaddr_storage ss;
+				struct sockaddr_in6 *si6;
+				if (pen_aton(ip, &ss) != 1) {
+					debug("acl: can't convert address %s", ip);
+					return;
+				}
+				if (ss.ss_family != AF_INET6) {
+					debug("acl: %s is not an ipv6 address", ip);
+					return;
+				}
+				si6 = (struct sockaddr_in6 *)&ss;
+				memcpy(ipaddr, &si6->sin6_addr, sizeof ipaddr);
+#endif
 				add_acl_ipv6(a, ipaddr, atoi(ma), permit);
 			} else {
 				struct in_addr ipaddr, mask;
@@ -1688,7 +1723,7 @@ static void add_client(int downfd, struct sockaddr_storage *cli_addr)
 	/* we don't know the client address for udp until we read the message */
 	if (udp) {
 		socklen_t len = sizeof *cli_addr;
-		rc = recvfrom(listenfd, b, sizeof b, 0, (struct sockaddr *)cli_addr, &len);
+		rc = recvfrom(listenfd, (void *)b, sizeof b, 0, (struct sockaddr *)cli_addr, &len);
 		DEBUG(2, "add_client: received %d bytes from client", rc);
 		if (rc < 0) {
 			if (errno != EINTR)
@@ -1735,7 +1770,7 @@ static void add_client(int downfd, struct sockaddr_storage *cli_addr)
 
 	if (udp && rc > 0) {	/* pass on the message */
 		/* we are "connected" and don't need sendto */
-		rc = send(conns[conn].upfd, b, rc, 0);
+		rc = send(conns[conn].upfd, (void *)b, rc, 0);
 		DEBUG(2, "add_client: wrote %d bytes to socket %d", rc, conns[conn].upfd);
 	}
 }
@@ -1771,7 +1806,7 @@ static int flush_down(int i)
 	if (!udp)
 		n = my_send(conns[i].downfd, conns[i].downbptr, conns[i].downn, 0);
 	else
-		n = sendto(conns[i].downfd, conns[i].downbptr, conns[i].downn, 0,
+		n = sendto(conns[i].downfd, (void *)conns[i].downbptr, conns[i].downn, 0,
 			(struct sockaddr *) &name, size);
 	err = socket_errno;
 #endif  /* HAVE_LIBSSL */
@@ -1814,7 +1849,7 @@ static int flush_up(int i)
 	if (!udp)
 		n = my_send(conns[i].upfd, conns[i].upbptr, conns[i].upn, 0);
 	else
-		n = sendto(conns[i].upfd, conns[i].upbptr, conns[i].upn, 0,
+		n = sendto(conns[i].upfd, (void *)conns[i].upbptr, conns[i].upn, 0,
 			(struct sockaddr *) &name, size);
 	err = socket_errno;
 
@@ -1854,6 +1889,7 @@ static void recycle_connection(void)
 	close_conn(i);
 }
 
+#ifndef WINDOWS
 static void setup_signals(void)
 {
 	usr1action.sa_handler = stats;
@@ -1900,6 +1936,17 @@ static void check_signals(void)
 		restart_log_flag=0;
 	}
 }
+#else
+static void setup_signals(void)
+{
+	;
+}
+
+static void check_signals(void)
+{
+	;
+}
+#endif
 
 static void check_listen_socket(void)
 {
@@ -1959,7 +2006,7 @@ static void check_if_connected(int i)
 	int result;
 	socklen_t length = sizeof result;
 	DEBUG(2, "Something happened to connection %d", i);
-	if (getsockopt(conns[i].upfd, SOL_SOCKET, SO_ERROR, &result, &length) < 0) {
+	if (getsockopt(conns[i].upfd, SOL_SOCKET, SO_ERROR, (void *)&result, &length) < 0) {
 		debug("Can't getsockopt: %s", strerror(errno));
 		close_conn(i);
 		return;
@@ -2380,8 +2427,6 @@ static int options(int argc, char **argv)
 int main(int argc, char **argv)
 {
 	int i, n;
-	struct passwd *pwd = NULL;
-	struct rlimit r;
 
 	acl_init();
 
@@ -2402,13 +2447,14 @@ int main(int argc, char **argv)
 	init(argc, argv);
 	read_cfg(cfgfile);
 
+#ifndef WINDOWS
+	struct rlimit r;
 	getrlimit(RLIMIT_CORE, &r);
 	r.rlim_cur = r.rlim_max;
 	setrlimit(RLIMIT_CORE, &r);
 
 	signal(SIGCHLD, SIG_IGN);
 
-#ifndef WINDOWS
 	if (!foreground) {
 		background();
 	}
@@ -2448,7 +2494,9 @@ int main(int argc, char **argv)
 	}
 #endif
 
+#ifndef WINDOWS
 	/* we must look up user id before chrooting */
+	struct passwd *pwd = NULL;
 	if (user) {
 		DEBUG(1, "Run as user %s", user);
 		pwd = getpwnam(user);
@@ -2468,6 +2516,7 @@ int main(int argc, char **argv)
 		if (setuid(pwd->pw_uid) == -1)
 			error("Can't setuid(%d)", (int)pwd->pw_uid);
 	}
+#endif
 
 	open_log(logfile);
 	if (pidfile) {
