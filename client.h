@@ -1,4 +1,5 @@
 #include <time.h>
+#include <stdint.h>
 #ifndef WINDOWS
 #include <sys/socket.h>
 #else
@@ -13,7 +14,7 @@ typedef struct {
 	struct sockaddr_storage addr;
 	int server;		/* server used last time */
 	long connects;
-	long long csx, crx;
+	uint64_t csx, crx;
 } client;
 
 extern client *clients;

@@ -26,7 +26,7 @@ typedef struct {
 	int prio;
 	int maxc;		/* max connections, soft limit */
 	int hard;		/* max connections, hard limit */
-	unsigned long long sx, rx;	/* bytes sent, received */
+	uint64_t sx, rx;	/* bytes sent, received */
 } server;
 
 extern int nservers;		/* number of servers */
