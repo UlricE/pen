@@ -59,6 +59,7 @@ int inet_aton(const char *cp, struct in_addr *addr)
 	return (addr->s_addr == INADDR_NONE) ? 0 : 1;
 }
 
+#if 0
 const char *inet_ntop(int af, const void *src, char *dst, socklen_t size)
 {
 	struct sockaddr_in sa;
@@ -72,6 +73,7 @@ const char *inet_ntop(int af, const void *src, char *dst, socklen_t size)
 	}
 	return dst;
 }
+#endif
 
 void make_nonblocking(int fd)
 {

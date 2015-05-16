@@ -56,13 +56,17 @@ extern int service_main(int, char **);
 extern int sigaction(int, const struct sigaction *, struct sigaction *);
 extern uid_t getuid(void);
 extern int inet_aton(const char *, struct in_addr *addr);
+#if 0
 extern const char *inet_ntop(int, const void *, char *, socklen_t);
+#endif
 extern void make_nonblocking(int);
 extern int start_winsock(void);
 
+#if 0
 /* stuff that exists in Windows that MinGW doesn't know about */
 const char *inet_ntop(int af, const void *src,
                       char *dst, socklen_t size);
 
 int inet_pton(int af, const char *src, void *dst);
+#endif
 #endif	/* WINDOWS */
