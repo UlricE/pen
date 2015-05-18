@@ -153,7 +153,7 @@ int main(int argc, char **argv)
 	} else {
 		n = 1+strlen(argv[1]);	/* one for \0 */
 		if (n > sizeof b) error("Overlong arg '%s'", argv[1]);
-		strcpy(b, argv[1]);
+		snprintf(b, sizeof b, "%s", argv[1]);
 		/* We need the *last* : to allow such arguments as ::1:10080
 		   if pen's control port is ipv6 localhost:10080 */
 		p = strrchr(b, ':');
