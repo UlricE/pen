@@ -166,7 +166,7 @@ int main(int argc, char **argv)
 
 	n = 2+strlen(argv[2]);	/* one for \n, one for \0 */
 	if (n > sizeof b) error("Overlong arg '%s'", argv[2]);
-	strcpy(b, argv[2]);
+	snprintf(b, sizeof b, "%s", argv[2]);
 	for (i = 3; argv[i]; i++) {
 		n = n+1+strlen(argv[i]);
 		if (n > sizeof b) error("Overlong arg '%s'", argv[i]);
