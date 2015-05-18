@@ -1,5 +1,6 @@
 #ifndef WINDOWS
 #include <netinet/in.h>
+#include <sys/socket.h>		/* for sockaddr_storage */
 #else
 #include <winsock2.h>
 #include <ws2ipdef.h>
