@@ -202,7 +202,7 @@ static int pen_strncasecmp(const char *p, const char *q, size_t n)
 	size_t i = 0;
 	int c = 0;
 
-	while ((i < n) && !(c = toupper(*p)-toupper(*q)) && *p) {
+	while ((i < n) && !(c = toupper((unsigned char)*p)-toupper((unsigned char)*q)) && *p) {
 		p++;
 		q++;
 		i++;
