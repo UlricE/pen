@@ -307,7 +307,7 @@ static void best_client1(char *p, char *s, long t, char *u)
 	}
 
 	/* now search the cache for a best match */
-	snprintf(p, sizeof p, "%s", s);
+	snprintf(p, 1024, "%s", s);
 	td = LONG_MAX;
 
 	for (i = 0; i < npc; i++) {
