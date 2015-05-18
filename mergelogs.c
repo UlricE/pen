@@ -316,7 +316,7 @@ static void best_client1(char *p, char *s, long t, char *u)
 		ntd = labs(t-pc[i].t);
 		if (ntd < td) {
 			td = ntd;
-			snprintf(p, sizeof p, "%s", pc[i].cli);
+			snprintf(p, 1024, "%s", pc[i].cli);
 		}
 	}
 }
