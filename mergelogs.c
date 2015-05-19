@@ -27,6 +27,7 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <time.h>
+#include "memory.h"
 
 #define KEEP_MAX 100	/* how much to keep from the URI */
 
@@ -73,33 +74,6 @@ static void error(char *fmt, ...)
 	va_end(ap);
 	fprintf(stderr, "\n");
 	exit(1);
-}
-
-static void *pen_malloc(size_t n)
-{
-	char *q = malloc(n);
-	if (!q) error("Can't allocate %ld bytes", (long)n);
-	return q;
-}
-
-static void *pen_calloc(size_t n, size_t s)
-{
-	char *q = calloc(n, s);
-	if (!q) error("Can't allocate %ld bytes", (long)n*s);
-	return q;
-}
-
-static void *pen_realloc(void *p, size_t n)
-{
-	char *q = realloc(p, n);
-	if (!q) error("Can't allocate %ld bytes", (long)n);
-	return q;
-}
-
-static char *pen_strdup(char *p)
-{
-	char *q = pen_malloc(strlen(p)+1);
-	return strcpy(q, p);
 }
 
 static void usage(void)
