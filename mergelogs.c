@@ -327,7 +327,7 @@ static void best_client0(char *p, char *s, long t, char *u)
 	char b[1024], from[1024], to[1024], uri[1024];
 	long when, td, ntd;
 	rewind(pfp);
-	strcpy(p, s);	/* default is client = server */
+	snprintf(p, 1024, "%s", s);	/* default is client = server */
 	td = LONG_MAX;
 	while (fgets(b, sizeof b, pfp)) {
 		if (sscanf(b, "%s %ld %s %[^\n]", from, &when, to, uri) != 4) {
