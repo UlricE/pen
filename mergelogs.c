@@ -46,9 +46,6 @@ typedef struct {
 
 static server *servers;
 static int nservers;
-#if 0
-static int debuglevel = 0;
-#endif
 
 static char *pfile;
 static int jitter = 600;	/* 10 minutes */
@@ -60,27 +57,6 @@ static char *months[] = {
 	"Jan", "Feb", "Mar", "Apr", "May", "Jun",
 	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 };
-
-#if 0
-static void debug(char *fmt, ...)
-{
-        va_list ap;
-        va_start(ap, fmt);
-        vfprintf(stderr, fmt, ap);
-        va_end(ap);
-        fprintf(stderr, "\n");
-}
-
-static void error(char *fmt, ...)
-{
-	va_list ap;
-	va_start(ap, fmt);
-	vfprintf(stderr, fmt, ap);
-	va_end(ap);
-	fprintf(stderr, "\n");
-	exit(1);
-}
-#endif
 
 static void usage(void)
 {
