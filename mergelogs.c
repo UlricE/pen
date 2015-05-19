@@ -27,7 +27,9 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <time.h>
+#include "diag.h"
 #include "memory.h"
+#include "settings.h"
 
 #define KEEP_MAX 100	/* how much to keep from the URI */
 
@@ -44,7 +46,9 @@ typedef struct {
 
 static server *servers;
 static int nservers;
+#if 0
 static int debuglevel = 0;
+#endif
 
 static char *pfile;
 static int jitter = 600;	/* 10 minutes */
@@ -57,6 +61,7 @@ static char *months[] = {
 	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 };
 
+#if 0
 static void debug(char *fmt, ...)
 {
         va_list ap;
@@ -75,6 +80,7 @@ static void error(char *fmt, ...)
 	fprintf(stderr, "\n");
 	exit(1);
 }
+#endif
 
 static void usage(void)
 {

@@ -4,7 +4,7 @@ noinst_HEADERS = pen.h dlist.h ssl.h dsr.h memory.h diag.h settings.h acl.h even
 
 pen_SOURCES = pen.c select.c poll.c kqueue.c epoll.c dlist.c ssl.c dsr.c memory.c diag.c settings.c acl.c event.c netconv.c server.c client.c conn.c idlers.c
 
-mergelogs_SOURCES = mergelogs.c memory.c
+mergelogs_SOURCES = mergelogs.c memory.c diag.c settings.c
 penctl_SOURCES = penctl.c
 penlog_SOURCES = penlog.c diag.c settings.c
 penlogd_SOURCES = penlogd.c diag.c settings.c
