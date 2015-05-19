@@ -162,7 +162,7 @@ static char *num2mon(int m)
 static void thenp(char *b, time_t t)
 {
 	struct tm *tms = localtime(&t);
-	sprintf(b, "%02d/%s/%04d:%02d:%02d:%02d +0000",
+	snprintf(b, 1024, "%02d/%s/%04d:%02d:%02d:%02d +0000",
 		tms->tm_mday, num2mon(tms->tm_mon), tms->tm_year+1900,
 		tms->tm_hour, tms->tm_min, tms->tm_sec);
 }
