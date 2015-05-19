@@ -339,7 +339,7 @@ static void best_client0(char *p, char *s, long t, char *u)
 		ntd = labs(t-when);
 		if (ntd < td) {
 			td = ntd;
-			strcpy(p, from);
+			snprintf(p, 1024, "%s", from);
 		}
 	}
 	if (debuglevel && td > 600) {
