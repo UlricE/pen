@@ -164,16 +164,18 @@ int main(int argc, char **argv)
 		fd = open_socket(b, p);
 	}
 
-	n = 2+strlen(argv[2]);	/* one for \n, one for \0 */
-	if (n > sizeof b) error("Overlong arg '%s'", argv[2]);
-	snprintf(b, sizeof b, "%s", argv[2]);
-	for (i = 3; argv[i]; i++) {
-		n = n+1+strlen(argv[i]);
-		if (n > sizeof b) error("Overlong arg '%s'", argv[i]);
-		strcat(b, " ");
-		strcat(b, argv[i]);
+	n = 0;
+	for (i = 2; argv[i]; i++) {
+		for (p = argv[i]; *p; p++) {
+			if (n >= (sizeof b)-1) error("Overlong argument list");
+			b[n++] = *p;
+		}
+		b[n++] = ' ';
 	}
-	strcat(b, "\n");
+	if (n >= (sizeof b)-1) error("Overlong argument list");
+	b[--n] = '\n';	/* replace last ' ' */
+	b[++n] = '\0';	/* terminate string */
+
 	n = write(fd, b, strlen(b));
 	if (n == -1) error("error writing to socket");
 	for (;;) {
