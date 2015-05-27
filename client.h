@@ -21,3 +21,4 @@ extern client *clients;
 extern int clients_max;
 
 extern int store_client(struct sockaddr_storage *);
+extern void expand_clienttable(int);

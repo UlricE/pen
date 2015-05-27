@@ -6,12 +6,13 @@
 #include "client.h"
 #include "conn.h"
 #include "diag.h"
+#include "memory.h"
 #include "netconv.h"
 #include "pen.h"
 #include "server.h"
 
 client *clients;
-int clients_max = CLIENTS_MAX;
+int clients_max = 0;
 
 /* Store client and return index */
 int store_client(struct sockaddr_storage *cli)
@@ -85,5 +86,13 @@ int store_client(struct sockaddr_storage *cli)
 	DEBUG(2, "Client %s has index %d", pen_ntoa(cli), i);
 
 	return i;
+}
+
+void expand_clienttable(int size)
+{
+	if (size <= clients_max) return;	/* nothing to do */
+	clients = pen_realloc(clients, size*sizeof *clients);
+	memset(&clients[clients_max], 0, (size-clients_max)*sizeof clients[0]);
+	clients_max = size;
 }
 
