@@ -1,5 +1,6 @@
 #include "config.h"
 #include <stdlib.h>
+#include <string.h>
 #ifndef WINDOWS
 #include <sys/socket.h>
 #endif
