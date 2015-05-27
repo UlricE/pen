@@ -277,13 +277,8 @@ static int webstats(void)
 			"<td>%d</td>\n"
 			"<td>%d</td>\n"
 			"<td>%d</td>\n"
-#if 0
-			"<td>%llu</td>\n"
-			"<td>%llu</td>\n"
-#else
 			"<td>%" PRIu64 "</td>\n"
 			"<td>%" PRIu64 "</td>\n"
-#endif
 			"<td>%d</td>\n"
 			"<td>%d</td>\n"
 			"</tr>\n",
@@ -317,13 +312,8 @@ static int webstats(void)
 			"<td>%ld</td>\n"
 			"<td>%d</td>\n"
 			"<td>%ld</td>\n"
-#if 0
-			"<td>%lld</td>\n"
-			"<td>%lld</td>\n"
-#else
 			"<td>%" PRIu64 "</td>\n"
 			"<td>%" PRIu64 "</td>\n"
-#endif
 			"</tr>\n",
 			i, pen_ntoa(&clients[i].addr),
 			(long)(now-clients[i].last), clients[i].server, clients[i].connects,
@@ -843,7 +833,7 @@ static void alarm_handler(int dummy)
 static void usage(void)
 {
 	printf("usage:\n"
-	       "  pen [-C addr:port] [-X] [-b sec] [-S N] [-c N] [-e host[:port]] \\\n"
+	       "  pen [-C addr:port] [-X] [-b sec] [-c N] [-e host[:port]] \\\n"
 	       "	  [-t sec] [-x N] [-w dir] [-HPWadfhrs] \\\n"
 	       "          [-o option] \\\n"
 #ifdef HAVE_LIBSSL
@@ -858,14 +848,13 @@ static void usage(void)
 	       "  -T sec    tracking time in seconds (0 = forever) [%d]\n"
 	       "  -H	add X-Forwarded-For header in http requests\n"
 	       "  -U	use udp protocol support\n"
-	       "  -O    use epoll to manage events (Linux)\n"
+	       "  -O option	use option in penctl format\n"
 	       "  -P	use poll() rather than select()\n"
 	       "  -Q    use kqueue to manage events (BSD)\n"
 	       "  -W    use weight for server selection\n"
 	       "  -X	enable 'exit' command for control port\n"
 	       "  -a	debugging dumps in ascii format\n"
 	       "  -b sec    blacklist time in seconds [%d]\n"
-	       "  -S N      max number of servers [%d]\n"
 	       "  -c N      max number of clients [%d]\n"
 	       "  -d	debugging on (repeat -d for more)\n"
 	       "  -e host:port emergency server of last resort\n"
@@ -895,7 +884,7 @@ static void usage(void)
 	       "example:\n"
 	       "  pen smtp mailhost1:smtp mailhost2:25 mailhost3\n"
 	       "\n",
-	       TRACKING_TIME, BLACKLIST_TIME, SERVERS_MAX, CLIENTS_MAX, TIMEOUT, CONNECTIONS_MAX);
+	       TRACKING_TIME, BLACKLIST_TIME, CLIENTS_MAX, TIMEOUT, CONNECTIONS_MAX);
 
 	exit(0);
 }
@@ -929,17 +918,10 @@ static void init(int argc, char **argv)
 	int i;
 	int server;
 
+	DEBUG(2, "init(%d, %p); port = %d", argc, argv, port);
+
 	conns = pen_calloc(connections_max, sizeof *conns);
 	clients = pen_calloc(clients_max, sizeof *clients);
-	/* one extra server slot for the emergency server */
-	/* and one for the abuse server */
-	/* Check that servers_max is big enough for the command line */
-	if ((argc-1) > servers_max) {
-		debug("command line specifies %d servers, max is %d; attempting to compensate",
-			argc-1, servers_max);
-		servers_max = argc-1;
-	}
-	servers = pen_calloc(servers_max+2, sizeof *servers);
 
 	nservers = 0;
 	current = 0;
@@ -947,6 +929,7 @@ static void init(int argc, char **argv)
 	server = 0;
 
 	for (i = 1; i < argc; i++) {
+		expand_servertable(server+1);
 		servers[server].status = 0;
 		servers[server].c = 0;	/* connections... */
 		setaddress(server, argv[i], port, proto);
@@ -956,33 +939,26 @@ static void init(int argc, char **argv)
 		nservers++;
 		server++;
 	}
-	while (nservers < servers_max) {
-		servers[server].status = 0;
-		servers[server].c = 0;	/* connections... */
-		setaddress(server, "0.0.0.0", 0, proto);
-		servers[server].sx = 0;
-		servers[server].rx = 0;
 
-		nservers++;
-		server++;
-	}
 	if (e_server) {
-		emerg_server = server;
-		servers[server].status = 0;
-		servers[server].c = 0;	/* connections... */
-		setaddress(server, e_server, port, proto);
-		servers[server].sx = 0;
-		servers[server].rx = 0;
+		expand_servertable(EMERGENCY_SERVER+1);
+		emerg_server = EMERGENCY_SERVER;
+		servers[EMERGENCY_SERVER].status = 0;
+		servers[EMERGENCY_SERVER].c = 0;	/* connections... */
+		setaddress(EMERGENCY_SERVER, e_server, port, proto);
+		servers[EMERGENCY_SERVER].sx = 0;
+		servers[EMERGENCY_SERVER].rx = 0;
 		server++;
 	}
 
 	if (a_server) {
-		abuse_server = server;
-		servers[server].status = 0;
-		servers[server].c = 0;	/* connections... */
-		setaddress(server, a_server, port, proto);
-		servers[server].sx = 0;
-		servers[server].rx = 0;
+		expand_servertable(ABUSE_SERVER+1);
+		abuse_server = ABUSE_SERVER;
+		servers[ABUSE_SERVER].status = 0;
+		servers[ABUSE_SERVER].c = 0;	/* connections... */
+		setaddress(ABUSE_SERVER, a_server, port, proto);
+		servers[ABUSE_SERVER].sx = 0;
+		servers[ABUSE_SERVER].rx = 0;
 		server++;
 	}
 
@@ -1075,9 +1051,8 @@ static int open_listener(char *a)
 	char b[1024], *p;
 	int one = 1;
 	int optval = 1;
-#if 0
-	int port;
-#endif
+
+	DEBUG(2, "open_listener(%s)", a);
 
 #ifndef WINDOWS
 	/* Handle Unix domain sockets separately */
@@ -1143,8 +1118,6 @@ static void write_cfg(char *p)
 	if (udp) fprintf(fp, " -U");
 	if (foreground) fprintf(fp, " -f");
 	if (exit_enabled) fprintf(fp, " -X");
-	if (servers_max != SERVERS_MAX)
-		fprintf(fp, " -S %d", servers_max);
 	if (clients_max != CLIENTS_MAX)
 		fprintf(fp, " -c %d", clients_max);
 	if (e_server) fprintf(fp, " -e %s", e_server);
@@ -1481,7 +1454,11 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		p = strtok(NULL, " ");
 		if (p == NULL) return;
 		n = atoi(p);
-		if (n < 0 || n >= nservers) return;
+		if (n < 0) return;
+		if (n >= nservers) {
+			nservers = n+1;
+			expand_servertable(nservers);
+		}
 		while ((p = strtok(NULL, " ")) && (q = strtok(NULL, " "))) {
 			if (!strcmp(p, "acl")) {
 				servers[n].acl = atoi(q);
@@ -2282,7 +2259,8 @@ static int options(int argc, char **argv)
 			event_init = poll_init;
 			break;
 		case 'S':
-			servers_max = atoi(optarg);
+			fprintf(stderr, "As of 0.28.1 the server table is expanded dynamically,\n"
+					"making the -S option obsolete\n");
 			break;
 		case 'T':
 			tracking_time = atoi(optarg);
@@ -2444,7 +2422,6 @@ int main(int argc, char **argv)
 	start_winsock();
 #endif
 
-	init(argc, argv);
 	read_cfg(cfgfile);
 
 #ifndef WINDOWS
@@ -2487,6 +2464,7 @@ int main(int argc, char **argv)
 	} else {
 		listenfd = open_listener(listenport);
 	}
+	init(argc, argv);
 
 #ifdef HAVE_LIBSSL
 	if (certfile) {

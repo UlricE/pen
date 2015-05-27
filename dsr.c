@@ -333,12 +333,13 @@ static int rebuild_hash_index(void)
 {
 	int i, j;
 	int t;			/* number of slots to fill */
-	int s[SERVERS_MAX];	/* how many slots should each server occupy */
+	int *s;			/* how many slots should each server occupy */
 	int ls;			/* number of live, available servers */
 	int tw;			/* total weights of all available servers */
 	int w;
 
 	DEBUG(3, "rebuild_hash_index()");
+	s = pen_malloc(nservers*sizeof *s);
 	/* first count how many servers we have */
 	ls = 0;
 	tw = 0;
@@ -358,6 +359,7 @@ static int rebuild_hash_index(void)
 	DEBUG(3, "%d servers with total weight %d", ls, tw);
 	if (tw == 0) {
 		debug("No available servers, can't rebuild");
+		free(s);
 		return 0;	/* without setting ALG_HASH_VALID */
 	}
 
@@ -389,6 +391,7 @@ printf("\n");
 
 	/* finally claim that the hash index is up to date */
 	server_alg |= ALG_HASH_VALID;
+	free(s);
 	return 1;
 }
 
@@ -408,7 +411,7 @@ static int select_server(struct in_addr *a, uint16_t port)
 	int h = hash(a, port);
 	int i;
 	if ((server_alg & ALG_HASH_VALID) == 0) {
-		if (!rebuild_hash_index()) return -1;	/* failure */
+		if (!rebuild_hash_index()) return NO_SERVER;	/* failure */
 	}
 	i = hash_index[h];
 	DEBUG(3, "select_server returning server %d for hash %d", i, h);
@@ -439,7 +442,7 @@ static int ipv4_frame(int fd, int n)
 		tcp_src_port = htons(*TCP_SRC_PORT(buf, ipv4_ihl));
 		tcp_dst_port = htons(*TCP_DST_PORT(buf, ipv4_ihl));
 		server = select_server(IPV4_SRC(buf), tcp_src_port);
-		if (server == -1) {
+		if (server == NO_SERVER) {
 			debug("Dropping frame, nowhere to put it");
 			return -1;
 		}

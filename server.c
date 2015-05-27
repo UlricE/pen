@@ -18,6 +18,7 @@
 #include "diag.h"
 #include "dlist.h"
 #include "event.h"
+#include "memory.h"
 #include "netconv.h"
 #include "pen.h"
 #include "server.h"
@@ -32,10 +33,9 @@ int nservers;
 server *servers;
 
 int current;		/* current server */
-int emerg_server = -1;	/* server of last resort */
+int emerg_server = NO_SERVER;	/* server of last resort */
 static int emergency = 0;	/* are we using the emergency server? */
-int abuse_server = -1;	/* server for naughty clients */
-int servers_max = SERVERS_MAX;
+int abuse_server = NO_SERVER;	/* server for naughty clients */
 int blacklist_time = BLACKLIST_TIME;
 int server_alg;
 char *e_server = NULL;
@@ -125,7 +125,7 @@ int server_is_unavailable(int i)
 
 static int server_by_weight(void)
 {
-	int best_server = -1;
+	int best_server = NO_SERVER;
 	int best_load = -1;
 	int i, load;
 
@@ -134,7 +134,7 @@ static int server_by_weight(void)
 		if (server_is_unavailable(i)) continue;
 		if (servers[i].weight == 0) continue;
 		load = (WEIGHT_FACTOR*servers[i].c)/servers[i].weight;
-		if (best_server == -1 || load < best_load) {
+		if (best_server == NO_SERVER || load < best_load) {
 			DEBUG(2, "Server %d has load %d", i, load);
 			best_load = load;
 			best_server = i;
@@ -146,7 +146,7 @@ static int server_by_weight(void)
 
 static int server_by_prio(void)
 {
-	int best_server = -1;
+	int best_server = NO_SERVER;
 	int best_prio = -1;
 	int i, prio;
 
@@ -154,7 +154,7 @@ static int server_by_prio(void)
 	for (i = 0; i < nservers; i++) {
 		if (server_is_unavailable(i)) continue;
 		prio = servers[i].prio;
-		if (best_server == -1 || prio < best_prio) {
+		if (best_server == NO_SERVER || prio < best_prio) {
 			DEBUG(2, "Server %d has prio %d", i, prio);
 			best_prio = prio;
 			best_server = i;
@@ -175,11 +175,11 @@ int server_by_roundrobin(void)
 		if (!server_is_unavailable(i)) return (last_server = i);
 		DEBUG(3, "server %d is unavailable, try next one", i);
 	} while (i != last_server);
-	return -1;
+	return NO_SERVER;
 }
 
 /* Suggest a server for the initial field of the connection.
-   Return -1 if none available.
+   Return NO_SERVER if none available.
 */
 int initial_server(int conn)
 {
@@ -191,8 +191,8 @@ int initial_server(int conn)
 	if (!(server_alg & ALG_ROUNDROBIN)) {
 		// Load balancing with memory == No roundrobin
 		int server = clients[conns[conn].client].server;
-		/* server may be -1 if this is a new client */
-		if (server != -1 && server != emerg_server && server != abuse_server) {
+		/* server may be NO_SERVER if this is a new client */
+		if (server != NO_SERVER && server != emerg_server && server != abuse_server) {
 			return server;
 		}
 	}
@@ -332,5 +332,17 @@ int try_server(int index, int conn)
 	conns[conn].upfd = upfd;
 	fd2conn_set(upfd, conn);
 	return 1;
+}
+
+void expand_servertable(int size)
+{
+	static server *server_storage = NULL;
+	static int real_size = 0;
+	int new_size = size+2;	/* for emergency and abuse servers */
+	if (new_size <= real_size) return;	/* nothing to expand here */
+	server_storage = pen_realloc(server_storage, new_size*sizeof *server_storage);
+	memset(&server_storage[real_size], 0, (new_size-real_size)*sizeof server_storage[0]);
+	servers = &server_storage[2];	/* making server[0] the first regular server */
+	real_size = new_size;
 }
 

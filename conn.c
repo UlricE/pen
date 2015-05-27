@@ -87,8 +87,8 @@ int store_conn(int downfd, int client)
 		conns[i].ssl = ssl;
 #endif
 		conns[i].client = client;
-		conns[i].initial = -1;
-		conns[i].server = -1;
+		conns[i].initial = NO_SERVER;
+		conns[i].server = NO_SERVER;
 		conns[i].srx = conns[i].ssx = 0;
 		conns[i].crx = conns[i].csx = 0;
 	} else {
@@ -113,8 +113,8 @@ void close_conn(int i)
 {
 	int index = conns[i].server;
 
-	/* unfinished connections have server == -1 */
-	if (index != -1) {
+	/* unfinished connections have server == NO_SERVER */
+	if (index != NO_SERVER) {
 		servers[index].c -= 1;
 		if (servers[index].c < 0) servers[index].c = 0;
 	}

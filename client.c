@@ -8,7 +8,7 @@
 #include "diag.h"
 #include "netconv.h"
 #include "pen.h"
-
+#include "server.h"
 
 client *clients;
 int clients_max = CLIENTS_MAX;
@@ -79,7 +79,7 @@ int store_client(struct sockaddr_storage *cli)
 
 	clients[i].last = now;
 	clients[i].addr = *cli;
-	clients[i].server = -1;
+	clients[i].server = NO_SERVER;
 	clients[i].connects++;
 
 	DEBUG(2, "Client %s has index %d", pen_ntoa(cli), i);

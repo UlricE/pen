@@ -1,5 +1,16 @@
 
+150526	Introduced the macro NO_SERVER to be used instead of -1 to signify
+	error conditions and such.
+	Removed the fixed server table size along with the -S option.
+
+150525	Fixed costmetic bug in startup code which required port to be specified
+	on backend servers even if it was the same as the listening port.
+
+150520	Released 0.28.0.
+
 150513	Numerous updates to support the madness that is Windows.
+
+150501	Fix from Vincent Bernat: segfault when not using SSL.
 
 150427	DSR support using Netmap on FreeBSD.
 	Unbroke DSR on Linux.

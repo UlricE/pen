@@ -12,7 +12,10 @@
 #define ALG_HASH 16
 #define ALG_STUBBORN 32
 
-#define SERVERS_MAX	16	/* max servers */
+#define EMERGENCY_SERVER (-1)
+#define ABUSE_SERVER (-2)
+#define NO_SERVER (-3)
+
 #define BLACKLIST_TIME	30	/* how long to shun a server that is down */
 #define WEIGHT_FACTOR	256	/* to make weight kick in earlier */
 
@@ -34,7 +37,6 @@ extern server *servers;
 extern int current;
 extern int emerg_server;
 extern int abuse_server;
-extern int servers_max;
 extern int blacklist_time;
 extern int server_alg;
 
@@ -50,3 +52,4 @@ extern int server_by_roundrobin(void);
 extern int initial_server(int);
 extern int failover_server(int);
 extern int try_server(int, int);
+extern void expand_servertable(int);

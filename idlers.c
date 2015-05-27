@@ -29,7 +29,7 @@ int add_idler(void)
 #endif
 	if (conn == -1) return 0;
 	conns[conn].initial = server_by_roundrobin();
-	if (conns[conn].initial == -1) {
+	if (conns[conn].initial == NO_SERVER) {
 		close_conn(conn);
 		return 0;
 	}
