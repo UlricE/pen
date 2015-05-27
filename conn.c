@@ -178,3 +178,11 @@ void close_conn(int i)
 		conns[i].server, servers[conns[i].server].sx, servers[conns[i].server].rx);
 }
 
+void expand_conntable(size_t size)
+{
+	if (size < connections_max) return;	/* nothing to do */
+	conns = pen_realloc(conns, size*sizeof *conns);
+	memset(&conns[connections_max], 0, (size-connections_max)*sizeof *conns);
+	connections_max = size;
+}
+

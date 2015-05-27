@@ -1,4 +1,8 @@
 
+150527	Allow the client table size to be updated on the fly. Default size still 2048.
+	Allow the connection table size to be updated in the fly. Default still 500.
+	See penctl.1, options clients_max and conn_max.
+
 150526	Introduced the macro NO_SERVER to be used instead of -1 to signify
 	error conditions and such.
 	Removed the fixed server table size along with the -S option.

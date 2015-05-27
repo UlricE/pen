@@ -54,3 +54,4 @@ int store_conn(int, int);
 #endif
 extern int idler(int);
 extern void close_conn(int);
+extern void expand_conntable(size_t);

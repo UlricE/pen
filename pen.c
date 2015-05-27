@@ -920,8 +920,13 @@ static void init(int argc, char **argv)
 
 	DEBUG(2, "init(%d, %p); port = %d", argc, argv, port);
 
+#if 0
 	conns = pen_calloc(connections_max, sizeof *conns);
 	clients = pen_calloc(clients_max, sizeof *clients);
+#else
+	if (connections_max == 0) expand_conntable(CONNECTIONS_MAX);
+	if (clients_max == 0) expand_clienttable(CLIENTS_MAX);
+#endif
 
 	nservers = 0;
 	current = 0;
@@ -1272,6 +1277,8 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 			client_acl = 0;
 		output(op, "%d\n", client_acl);
 	} else if (!strcmp(p, "clients_max")) {
+		p = strtok(NULL, " ");
+		if (p) expand_clienttable(atoi(p));
 		output(op, "%d\n", clients_max);
 	} else if (!strcmp(p, "close")) {
 		p = strtok(NULL, " ");
@@ -1297,6 +1304,8 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 			output(op, "pend = %d\n", conns[conn].pend);
 		}
 	} else if (!strcmp(p, "conn_max")) {
+		p = strtok(NULL, " ");
+		if (p) expand_clienttable(atoi(p));
 		output(op, "%d\n", connections_max);
 	} else if (!strcmp(p, "control")) {
 		output(op, "%s\n", ctrlport);
@@ -2281,7 +2290,11 @@ static int options(int argc, char **argv)
 			blacklist_time = atoi(optarg);
 			break;
 		case 'c':
+#if 0
 			clients_max = atoi(optarg);
+#else
+			expand_clienttable(atoi(optarg));
+#endif
 			break;
 		case 'd':
 			debuglevel++;
@@ -2354,7 +2367,11 @@ static int options(int argc, char **argv)
 #endif
 			break;
 		case 'x':
+#if 0
 			connections_max = atoi(optarg);
+#else
+			expand_conntable(atoi(optarg));
+#endif
 			break;
 		case 'w':
 			webfile = pen_strdup(optarg);
