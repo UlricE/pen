@@ -5,3 +5,4 @@ extern int tcp_fastclose;
 extern int keepalive;
 extern int protoid;
 extern int udp;
+extern int transparent;

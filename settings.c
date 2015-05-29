@@ -12,3 +12,4 @@ int tcp_fastclose = 0;
 int keepalive = 0;
 int protoid = SOCK_STREAM;
 int udp = 0;
+int transparent = 0;
