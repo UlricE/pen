@@ -245,7 +245,7 @@ int failover_server(int conn)
 static void spoof_bind(int server, int conn, int upfd)
 {
 #if defined(IP_TRANSPARENT)	/* Linux */
-#define PEN_TRANSPARENCY IP_TRANSPAENT
+#define PEN_TRANSPARENCY IP_TRANSPARENT
 #elif defined(OS_BINDANY)	/* OpenBSD */
 #define PEN_TRANSPARENCY OS_BINDANY
 #elif defined(IP_BINDANY)	/* FreeBSD */
@@ -269,7 +269,7 @@ static void spoof_bind(int server, int conn, int upfd)
 		debug("No transparency for incompatible families");
 		return;
 	}
-	n = setsockopt(upfd, IPPROTO_IP, IP_TRANSPARENT, &one, sizeof one);
+	n = setsockopt(upfd, IPPROTO_IP, PEN_TRANSPARENCY, &one, sizeof one);
 	if (n == -1) {
 		DEBUG(1, "upfd = %d", upfd);
 		debug("setsockopt: %s", strerror(errno));
