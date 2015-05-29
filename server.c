@@ -269,7 +269,7 @@ static void spoof_bind(int server, int conn, int upfd)
 		debug("No transparency for incompatible families");
 		return;
 	}
-	n = setsockopt(upfd, SOL_IP, IP_TRANSPARENT, &one, sizeof one);
+	n = setsockopt(upfd, IPPROTO_IP, IP_TRANSPARENT, &one, sizeof one);
 	if (n == -1) {
 		DEBUG(1, "upfd = %d", upfd);
 		debug("setsockopt: %s", strerror(errno));
