@@ -78,8 +78,8 @@ Make sockets nonblocking.
 \fIclient_acl N\fR
 Check connecting clients against access list N (default 0).
 .TP
-\fIclients_max\fR
-Return max number of clients.
+\fIclients_max [N]\fR
+With argument, increase the maximum number of known clients. Returns max number of clients.
 .TP
 \fIclose N\fR
 Close connection N
@@ -87,8 +87,8 @@ Close connection N
 \fIconnection N\fR
 Display some basic information about connection N.
 .TP
-\fIconn_max\fR
-Return max number of simultaneous connections.
+\fIconn_max [N]\fR
+With argument, increase the max number of simultaneous connections. Returns max number.
 .TP
 \fIcontrol\fR
 Return address and port where pen listens for control connections.
@@ -243,6 +243,12 @@ Set connect timeout to N seconds.
 .TP
 \fItracking N\fR
 Set tracking time, i.e. how long clients will be remembered. The default 0 will never expire clients based on time.
+.TP
+\fItransparent\fR
+On compatible platforms, use the client's address as source address in the connection to the backend server.
+.TP
+\fIno transparent\fR
+Use Pen's address as source address in the connection to the backen server.
 .TP
 \fIweb_stats\fR
 Return file name of html status reports, if any.
