@@ -924,8 +924,12 @@ static void init(int argc, char **argv)
 	conns = pen_calloc(connections_max, sizeof *conns);
 	clients = pen_calloc(clients_max, sizeof *clients);
 #else
+	debug("Before: conns = %p, connections_max = %d, clients = %p, clients_max = %d",
+		conns, connections_max, clients, clients_max);
 	if (connections_max == 0) expand_conntable(CONNECTIONS_MAX);
 	if (clients_max == 0) expand_clienttable(CLIENTS_MAX);
+	debug("After: conns = %p, connections_max = %d, clients = %p, clients_max = %d",
+		conns, connections_max, clients, clients_max);
 #endif
 
 	nservers = 0;
@@ -975,12 +979,14 @@ static void init(int argc, char **argv)
 		clients[i].csx = 0;
 		clients[i].crx = 0;
 	}
+#if 0
 	for (i = 0; i < connections_max; i++) {
 		conns[i].upfd = -1;
 		conns[i].downfd = -1;
 		conns[i].upn = 0;
 		conns[i].downn = 0;
 	}
+#endif
 
 	if (debuglevel) {
 		debug("%s starting", PACKAGE_STRING);
@@ -1428,6 +1434,8 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 			server_alg &= ~ALG_STUBBORN;
 		} else if (!strcmp(p, "tcp_nodelay")) {
 			tcp_nodelay = 0;
+		} else if (!strcmp(p, "transparent")) {
+			transparent = 0;
 		} else if (!strcmp(p, "web_stats")) {
 			webfile = NULL;
 		} else if (!strcmp(p, "weight")) {
@@ -1596,6 +1604,8 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		p = strtok(NULL, " ");
 		if (p) tracking_time = atoi(p);
 		output(op, "%d\n", tracking_time);
+	} else if (!strcmp(p, "transparent")) {
+		transparent = 1;
 	} else if (!strcmp(p, "web_stats")) {
 		p = strtok(NULL, " ");
 		if (p) {

@@ -240,6 +240,65 @@ int failover_server(int conn)
 	return 0;
 }
 
+/* Using os-specific, similar but incompatible techniques, attempt to be transparent by
+   setting our local upstream address to the client's address */
+static void spoof_bind(int server, int conn, int upfd)
+{
+#if defined(IP_TRANSPARENT)	/* Linux */
+#define PEN_TRANSPARENCY IP_TRANSPAENT
+#elif defined(OS_BINDANY)	/* OpenBSD */
+#define PEN_TRANSPARENCY OS_BINDANY
+#elif defined(IP_BINDANY)	/* FreeBSD */
+#define PEN_TRANSPARENCY IP_BINDANY
+#else
+#undef PEN_TRANSPARENCY
+#endif
+
+#ifdef PEN_TRANSPARENCY
+	int client = conns[conn].client;
+	int n;
+	int one = 1;
+	struct sockaddr_storage *sss = &servers[server].addr;
+	struct sockaddr_storage *css = &clients[client].addr;
+	struct sockaddr_in *caddr, addr;
+	DEBUG(1, "spoof_bind(server = %d, conn = %d, upfd = %d)", server, conn, upfd);
+	DEBUG(1, "client = %d", client);
+	if (sss->ss_family != AF_INET || css->ss_family != AF_INET) {
+		DEBUG(1, "server family = %d", sss->ss_family);
+		DEBUG(1, "client family = %d", css->ss_family);
+		debug("No transparency for incompatible families");
+		return;
+	}
+	n = setsockopt(upfd, SOL_IP, IP_TRANSPARENT, &one, sizeof one);
+	if (n == -1) {
+		DEBUG(1, "upfd = %d", upfd);
+		debug("setsockopt: %s", strerror(errno));
+		return;
+	}
+	caddr = (struct sockaddr_in *)css;
+	addr.sin_family = caddr->sin_family;
+	addr.sin_port = 0;
+	addr.sin_addr.s_addr = caddr->sin_addr.s_addr;
+	n = bind(upfd, (struct sockaddr *)&addr, sizeof addr);
+	if (n == -1) {
+		DEBUG(1, "upfd = %d", upfd);
+		debug("bind: %s", strerror(errno));
+		return;
+	}
+#else
+	debug("You are trying to be transparent, but it is not supported");
+#endif
+}
+
+#define RETURN_IF_FAIL(function, ...) \
+do { \
+	int n = function(__VA_ARGS__); \
+	if (n == -1) { \
+		debug(#function ": %s", strerror(errno); \
+		return; \
+	} \
+} while (0);
+
 /* Initiate connection to server 'index' and populate upfd field in connection */
 /* return 1 for (potential) success, 0 for failure */
 int try_server(int index, int conn)
@@ -285,6 +344,9 @@ int try_server(int index, int conn)
 		pen_dumpaddr(addr);
 	}
 	conns[conn].t = now;
+
+	if (transparent) spoof_bind(index, conn, upfd);
+
 	n = connect(upfd, (struct sockaddr *)addr, pen_ss_size(addr));
 	err = socket_errno;
 	DEBUG(2, "connect (upfd = %d) returns %d, errno = %d, socket_errno = %d",

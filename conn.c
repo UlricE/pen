@@ -21,7 +21,7 @@ int pending_list = -1;	/* pending connections */
 int pending_queue = 0;	/* number of pending connections */
 int pending_max = 100;	/* max number of pending connections */
 connection *conns;
-int connections_max = CONNECTIONS_MAX;
+int connections_max = 0;
 int connections_used = 0;
 int connections_last = 0;
 int tracking_time = TRACKING_TIME;
@@ -181,9 +181,14 @@ void close_conn(int i)
 
 void expand_conntable(size_t size)
 {
+	int i;
+	DEBUG(1, "expand_conntable(%d)", size);
 	if (size < connections_max) return;	/* nothing to do */
 	conns = pen_realloc(conns, size*sizeof *conns);
 	memset(&conns[connections_max], 0, (size-connections_max)*sizeof *conns);
+	for (i = connections_max; i < size; i++) {
+		conns[i].upfd = conns[i].downfd = -1;
+	}
 	connections_max = size;
 }
 
