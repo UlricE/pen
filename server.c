@@ -247,7 +247,7 @@ static void spoof_bind(int server, int conn, int upfd)
 #if defined(IP_TRANSPARENT)	/* Linux */
 #define PEN_TRANSPARENCY IP_TRANSPARENT
 #elif defined(SO_BINDANY)	/* OpenBSD */
-#define PEN_TRANSPARENCY OS_BINDANY
+#define PEN_TRANSPARENCY SO_BINDANY
 #elif defined(IP_BINDANY)	/* FreeBSD */
 #define PEN_TRANSPARENCY IP_BINDANY
 #else
