@@ -409,5 +409,6 @@ void expand_servertable(int size)
 	memset(&server_storage[real_size], 0, (new_size-real_size)*sizeof server_storage[0]);
 	servers = &server_storage[2];	/* making server[0] the first regular server */
 	real_size = new_size;
+	if (size > nservers) nservers = size;
 }
 

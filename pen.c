@@ -944,8 +944,6 @@ static void init(int argc, char **argv)
 		setaddress(server, argv[i], port, proto);
 		servers[server].sx = 0;
 		servers[server].rx = 0;
-
-		nservers++;
 		server++;
 	}
 
@@ -1473,8 +1471,7 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		n = atoi(p);
 		if (n < 0) return;
 		if (n >= nservers) {
-			nservers = n+1;
-			expand_servertable(nservers);
+			expand_servertable(nservers+1);
 		}
 		while ((p = strtok(NULL, " ")) && (q = strtok(NULL, " "))) {
 			if (!strcmp(p, "acl")) {
