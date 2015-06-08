@@ -29,8 +29,8 @@
 #define CONNECT_IN_PROGRESS (EINPROGRESS)
 #endif
 
-int nservers;
-server *servers;
+int nservers = 0;
+server *servers = NULL;
 
 int current;		/* current server */
 int emerg_server = NO_SERVER;	/* server of last resort */
@@ -400,6 +400,7 @@ int try_server(int index, int conn)
 	return 1;
 }
 
+/* we want size server slots plus two for abuse and emergency */
 void expand_servertable(int size)
 {
 	static server *server_storage = NULL;

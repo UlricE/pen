@@ -932,7 +932,6 @@ static void init(int argc, char **argv)
 		conns, connections_max, clients, clients_max);
 #endif
 
-	nservers = 0;
 	current = 0;
 
 	server = 0;
@@ -1470,9 +1469,7 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		if (p == NULL) return;
 		n = atoi(p);
 		if (n < 0) return;
-		if (n >= nservers) {
-			expand_servertable(nservers+1);
-		}
+		expand_servertable(n+1);
 		while ((p = strtok(NULL, " ")) && (q = strtok(NULL, " "))) {
 			if (!strcmp(p, "acl")) {
 				servers[n].acl = atoi(q);
