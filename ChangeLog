@@ -1,4 +1,6 @@
 
+150608	Released 0.29.0.
+
 150528	Transparent reverse proxy support for Linux, FreeBSD and OpenBSD.
 
 150527	Allow the client table size to be updated on the fly. Default size still 2048.
@@ -9,7 +11,7 @@
 	error conditions and such.
 	Removed the fixed server table size along with the -S option.
 
-150525	Fixed costmetic bug in startup code which required port to be specified
+150525	Fixed cosmetic bug in startup code which required port to be specified
 	on backend servers even if it was the same as the listening port.
 
 150520	Released 0.28.0.
