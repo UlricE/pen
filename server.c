@@ -169,6 +169,7 @@ int server_by_roundrobin(void)
 	static int last_server = 0;
 	int i = last_server;
 
+	if (nservers == 0) return NO_SERVER;
 	do {
 		i = (i+1) % nservers;
 		DEBUG(3, "server_by_roundrobin considering server %d", i);
