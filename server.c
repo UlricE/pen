@@ -294,15 +294,6 @@ static void spoof_bind(int server, int conn, int upfd)
 #endif
 }
 
-#define RETURN_IF_FAIL(function, ...) \
-do { \
-	int n = function(__VA_ARGS__); \
-	if (n == -1) { \
-		debug(#function ": %s", strerror(errno); \
-		return; \
-	} \
-} while (0);
-
 /* Initiate connection to server 'index' and populate upfd field in connection */
 /* return 1 for (potential) success, 0 for failure */
 int try_server(int index, int conn)
