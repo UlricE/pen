@@ -1,4 +1,7 @@
 
+150725	Added #ifdef around SSLv3 initialization code in ssl, as
+	suggested by jca@openbsd.org.
+
 150608	Released 0.29.0.
 
 150528	Transparent reverse proxy support for Linux, FreeBSD and OpenBSD.

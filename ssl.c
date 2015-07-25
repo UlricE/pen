@@ -277,9 +277,11 @@ static SSL_CTX *ssl_create_context(char *keyfile, char *certfile,
 		ssl_context = SSL_CTX_new(SSLv2_method());
 		break;
 #endif
+#ifndef OPENSSL_NO_SSL3
 	case SRV_SSL_V3:
 		ssl_context = SSL_CTX_new(SSLv3_method());
 		break;
+#endif
 	default:
 	case SRV_SSL_V23:
 		ssl_context = SSL_CTX_new(SSLv23_method());
