@@ -1,4 +1,6 @@
 
+150803	Updated configure.ac for compatibility with CentOS 6.
+
 150725	Added #ifdef around SSLv3 initialization code in ssl, as
 	suggested by jca@openbsd.org.
 
