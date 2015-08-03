@@ -421,12 +421,15 @@ static int select_server(struct in_addr *a, uint16_t port)
 #define TCP_SEGMENT(f, i) (PAYLOAD(f)+i)
 #define TCP_SRC_PORT(f, i) (uint16_t *)(TCP_SEGMENT(f, i))
 #define TCP_DST_PORT(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+2)
+#define UDP_SEGMENT(f, i) (PAYLOAD(f)+i)
+#define UDP_SRC_PORT(f, i) (uint16_t *)(UDP_SEGMENT(f, i))
+#define UDP_DST_PORT(f, i) (uint16_t *)(UDP_SEGMENT(f, i)+2)
 
 static int ipv4_frame(int fd, int n)
 {
 	uint8_t ipv4_protocol;
 	uint8_t ipv4_ihl;
-	uint16_t tcp_src_port, tcp_dst_port;
+	uint16_t src_port, dst_port;
 	int server;
 
 	DEBUG(2, "IPv4");
@@ -436,26 +439,53 @@ static int ipv4_frame(int fd, int n)
 	DEBUG(2, "Protocol: %d / %s", ipv4_protocol, proto2str(ipv4_protocol));
 	DEBUG(2, "Sender IPv4 address: %s", inet_ntoa(*IPV4_SRC(buf)));
 	DEBUG(2, "Destination IPv4 address: %s", inet_ntoa(*IPV4_DST(buf)));
-	if ((ipv4_protocol == 6) &&
-	    (*(uint32_t *)IPV4_DST(buf) == (uint32_t)our_ip_addr.s_addr)) {
-		DEBUG(2, "We should forward this.");
-		tcp_src_port = htons(*TCP_SRC_PORT(buf, ipv4_ihl));
-		tcp_dst_port = htons(*TCP_DST_PORT(buf, ipv4_ihl));
-		server = select_server(IPV4_SRC(buf), tcp_src_port);
-		if (server == NO_SERVER) {
-			debug("Dropping frame, nowhere to put it");
-			return -1;
+	if (udp) {
+DEBUG(3, "Doing udp");
+		if ((ipv4_protocol == 17) &&
+		    (*(uint32_t *)IPV4_DST(buf) == (uint32_t)our_ip_addr.s_addr)) {
+			DEBUG(2, "We should forward this.");
+			src_port = htons(*UDP_SRC_PORT(buf, ipv4_ihl));
+			dst_port = htons(*UDP_DST_PORT(buf, ipv4_ihl));
+			server = select_server(IPV4_SRC(buf), src_port);
+			if (server == NO_SERVER) {
+				debug("Dropping frame, nowhere to put it");
+				return -1;
+			}
+			if (!real_hw_known(server)) {
+				DEBUG(2, "Real hw addr unknown");
+				return -1;
+			}
+			DEBUG(2, "Source port = %d, destination port = %d",
+				src_port, dst_port);
+			if (port == 0 || dst_port == port) {
+				memcpy(MAC_DST(buf), servers[server].hwaddr, 6);
+				DEBUG(2, "Sending %d bytes", n);
+				n = send_packet(fd, buf, n);
+			}
 		}
-		if (!real_hw_known(server)) {
-			DEBUG(2, "Real hw addr unknown");
-			return -1;
-		}
-		DEBUG(2, "Source port = %d, destination port = %d",
-			tcp_src_port, tcp_dst_port);
-		if (port == 0 || tcp_dst_port == port) {
-			memcpy(MAC_DST(buf), servers[server].hwaddr, 6);
-			DEBUG(2, "Sending %d bytes", n);
-			n = send_packet(fd, buf, n);
+	} else {	/* not udp, i.e. tcp */
+DEBUG(3, "Doing tcp");
+		if ((ipv4_protocol == 6) &&
+		    (*(uint32_t *)IPV4_DST(buf) == (uint32_t)our_ip_addr.s_addr)) {
+			DEBUG(2, "We should forward this.");
+			src_port = htons(*TCP_SRC_PORT(buf, ipv4_ihl));
+			dst_port = htons(*TCP_DST_PORT(buf, ipv4_ihl));
+			server = select_server(IPV4_SRC(buf), src_port);
+			if (server == NO_SERVER) {
+				debug("Dropping frame, nowhere to put it");
+				return -1;
+			}
+			if (!real_hw_known(server)) {
+				DEBUG(2, "Real hw addr unknown");
+				return -1;
+			}
+			DEBUG(2, "Source port = %d, destination port = %d",
+				src_port, dst_port);
+			if (port == 0 || dst_port == port) {
+				memcpy(MAC_DST(buf), servers[server].hwaddr, 6);
+				DEBUG(2, "Sending %d bytes", n);
+				n = send_packet(fd, buf, n);
+			}
 		}
 	}
 	return 0;
@@ -504,7 +534,6 @@ void dsr_frame(int fd)
 	}
 
 	limit = max_pkts();
-//debug("Forwarding %d packets", limit);
 
 	for (i = 0; i < limit; i++) {
 		dirty_bytes = recv_packet(fd, buf);
