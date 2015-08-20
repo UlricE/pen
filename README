@@ -28,10 +28,17 @@ decide which is active.
 
 
 A side-effect of load-balancing web servers is that several logfiles
-are produced, and all accesses seem to come from the load balancer.
+are produced, and by default, Pen operates in a proxy mode that makes
+all accesses seem to come from the load balancer.
 The program penlogd solves this problem by merging pen's log file
 with the ones produced by the web servers. See penlogd(1) and penlog(1)
 for details.
+
+The Direct Server Return and Transparent Reverse Proxy modes make
+accesses seem to come directly from the client. Multiple logfiles
+are still created, and Penlogd can still be used to consolidate them
+automatically.
+
 
 This load balancer is known to work on FreeBSD, Linux, HP-UX and Solaris.
 Other Unixes should work as well, possibly requiring trivial changes.
