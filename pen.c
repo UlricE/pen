@@ -834,7 +834,7 @@ static void usage(void)
 {
 	printf("usage:\n"
 	       "  pen [-C addr:port] [-X] [-b sec] [-c N] [-e host[:port]] \\\n"
-	       "	  [-t sec] [-x N] [-w dir] [-HPWadfhrs] \\\n"
+	       "	  [-t sec] [-x N] [-w dir] [-UHPWadfhrs] \\\n"
 	       "          [-o option] \\\n"
 #ifdef HAVE_LIBSSL
 	       "	  [-E certfile] [-K keyfile] \\\n"
