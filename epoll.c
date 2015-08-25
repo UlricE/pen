@@ -20,6 +20,7 @@ static void epoll_event_ctl(int fd, int events, int op)
 {
 	int n, epevents = 0;
 	struct epoll_event ev;
+	memset(&ev, 0, sizeof(struct epoll_event));
 	DEBUG(2, "epoll_event_ctl(fd=%d, events=%d, op=%d)", fd, events, op);
 	if (events & EVENT_READ) epevents |= EPOLLIN;
 	if (events & EVENT_WRITE) epevents |= EPOLLOUT;
