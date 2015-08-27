@@ -1,4 +1,6 @@
 
+150818	Released 0.30.0.
+
 150803	Added UDP mode for Direct Server Return.
 
 150803	Updated configure.ac for compatibility with CentOS 6.
