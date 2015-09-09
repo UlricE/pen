@@ -440,7 +440,7 @@ static int ipv4_frame(int fd, int n)
 	DEBUG(2, "Sender IPv4 address: %s", inet_ntoa(*IPV4_SRC(buf)));
 	DEBUG(2, "Destination IPv4 address: %s", inet_ntoa(*IPV4_DST(buf)));
 	if (udp) {
-DEBUG(3, "Doing udp");
+		DEBUG(3, "Doing udp");
 		if ((ipv4_protocol == 17) &&
 		    (*(uint32_t *)IPV4_DST(buf) == (uint32_t)our_ip_addr.s_addr)) {
 			DEBUG(2, "We should forward this.");
@@ -464,7 +464,7 @@ DEBUG(3, "Doing udp");
 			}
 		}
 	} else {	/* not udp, i.e. tcp */
-DEBUG(3, "Doing tcp");
+		DEBUG(3, "Doing tcp");
 		if ((ipv4_protocol == 6) &&
 		    (*(uint32_t *)IPV4_DST(buf) == (uint32_t)our_ip_addr.s_addr)) {
 			DEBUG(2, "We should forward this.");

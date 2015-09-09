@@ -192,6 +192,7 @@ int initial_server(int conn)
 	if (!(server_alg & ALG_ROUNDROBIN)) {
 		// Load balancing with memory == No roundrobin
 		int server = clients[conns[conn].client].server;
+		DEBUG(2, "Will try previous server %d for client %d", server, conns[conn].client);
 		/* server may be NO_SERVER if this is a new client */
 		if (server != NO_SERVER && server != emerg_server && server != abuse_server) {
 			return server;
@@ -385,6 +386,8 @@ int try_server(int index, int conn)
 		return 0;
 	}
 	conns[conn].server = index;
+	DEBUG(2, "Setting server %d for client %d", index, client);
+	clients[client].server = index;
 	current = index;
 	conns[conn].upfd = upfd;
 	fd2conn_set(upfd, conn);
