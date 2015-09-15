@@ -1,4 +1,10 @@
 
+150915	Officially released 0.30.1.
+
+150909	Fixed IP-based client tracking.
+
+150828	Removed unnecessary #include <pen.h> in dlist.c
+
 150818	Released 0.30.0.
 
 150803	Added UDP mode for Direct Server Return.
