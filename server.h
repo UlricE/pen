@@ -11,6 +11,7 @@
 #define ALG_PRIO 8
 #define ALG_HASH 16
 #define ALG_STUBBORN 32
+#define ALG_HASH_NO_SERVER 64
 
 #define EMERGENCY_SERVER (-1)
 #define ABUSE_SERVER (-2)
