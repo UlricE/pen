@@ -848,6 +848,7 @@ static void usage(void)
 	       "  -T sec    tracking time in seconds (0 = forever) [%d]\n"
 	       "  -H	add X-Forwarded-For header in http requests\n"
 	       "  -U	use udp protocol support\n"
+	       "  -N	use hash for initial server selection without save server\n"
 	       "  -O option	use option in penctl format\n"
 	       "  -P	use poll() rather than select()\n"
 	       "  -Q    use kqueue to manage events (BSD)\n"
@@ -2239,9 +2240,9 @@ static int options(int argc, char **argv)
 	char b[1024];
 
 #ifdef HAVE_LIBSSL
-	char *opt = "B:C:F:O:S:T:b:c:e:i:j:l:m:o:p:q:t:u:w:x:DHPQWXUadfhnrsE:K:G:A:ZRL:";
+	char *opt = "B:C:F:O:S:T:b:c:e:i:j:l:m:o:p:q:t:u:w:x:DHNPQWXUadfhnrsE:K:G:A:ZRL:";
 #else
-	char *opt = "B:C:F:O:S:T:b:c:e:i:j:l:m:o:p:q:t:u:w:x:DHPQWXUadfhnrs";
+	char *opt = "B:C:F:O:S:T:b:c:e:i:j:l:m:o:p:q:t:u:w:x:DHNPQWXUadfhnrs";
 #endif
 
 	while ((c = getopt(argc, argv, opt)) != -1) {
@@ -2414,6 +2415,9 @@ static int options(int argc, char **argv)
 			}
 			break;
 #endif  /* HAVE_LIBSSL */
+		case 'N':
+			server_alg |= ALG_HASH_NO_SERVER;
+			break;
 		case '?':
 		default:
 			usage();

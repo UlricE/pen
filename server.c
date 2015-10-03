@@ -46,11 +46,17 @@ static int pen_hash(struct sockaddr_storage *a)
 	struct sockaddr_in *si;
 	struct sockaddr_in6 *si6;
 	unsigned char *u;
+	int hash;
 
 	switch (a->ss_family) {
 	case AF_INET:
 		si = (struct sockaddr_in *)a;
-		return si->sin_addr.s_addr % nservers;
+		hash = (si->sin_addr.s_addr ^ si->sin_port) % nservers;
+
+		DEBUG(2, "Hash: %d", hash);
+
+		return hash;
+
 	case AF_INET6:
 		si6 = (struct sockaddr_in6 *)a;
 		u = (unsigned char *)(&si6->sin6_addr);
@@ -200,7 +206,7 @@ int initial_server(int conn)
 	}
 	if (server_alg & ALG_PRIO) return server_by_prio();
 	if (server_alg & ALG_WEIGHT) return server_by_weight();
-	if (server_alg & ALG_HASH) return pen_hash(&clients[conns[conn].client].addr);
+	if (server_alg & ALG_HASH || server_alg & ALG_HASH_NO_SERVER) return pen_hash(&clients[conns[conn].client].addr);
 	return server_by_roundrobin();
 }
 
