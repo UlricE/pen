@@ -84,10 +84,6 @@ int store_client(struct sockaddr_storage *cli)
 	clients[i].addr = *cli;
 	clients[i].connects++;
 	
-	/* don't remember server */
-	if(server_alg & ALG_HASH_NO_SERVER) {
-		clients[i].server = NO_SERVER;
-	}
 
 	DEBUG(2, "Client %s has index %d", pen_ntoa(cli), i);
 

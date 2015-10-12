@@ -2415,9 +2415,6 @@ static int options(int argc, char **argv)
 			}
 			break;
 #endif  /* HAVE_LIBSSL */
-		case 'N':
-			server_alg |= ALG_HASH_NO_SERVER;
-			break;
 		case '?':
 		default:
 			usage();
