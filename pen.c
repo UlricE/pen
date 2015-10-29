@@ -938,6 +938,7 @@ static void init(int argc, char **argv)
 	server = 0;
 
 	for (i = 1; i < argc; i++) {
+		DEBUG(2, "server[%d] = %s", server, argv[i]);
 		expand_servertable(server+1);
 		servers[server].status = 0;
 		servers[server].c = 0;	/* connections... */
@@ -948,6 +949,7 @@ static void init(int argc, char **argv)
 	}
 
 	if (e_server) {
+		DEBUG(2, "Emergency server = %s", e_server);
 		expand_servertable(EMERGENCY_SERVER+1);
 		emerg_server = EMERGENCY_SERVER;
 		servers[EMERGENCY_SERVER].status = 0;
@@ -959,6 +961,7 @@ static void init(int argc, char **argv)
 	}
 
 	if (a_server) {
+		DEBUG(2, "Abuse server = %s", a_server);
 		expand_servertable(ABUSE_SERVER+1);
 		abuse_server = ABUSE_SERVER;
 		servers[ABUSE_SERVER].status = 0;

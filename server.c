@@ -198,6 +198,8 @@ int initial_server(int conn)
 	if (!pd) {
 		DEBUG(1, "initial_server: denied by acl");
 		return abuse_server;
+		/* returning abuse_server is correct even if it is not set
+		   because it defaults to NO_SERVER */
 	}
 	if (!(server_alg & ALG_ROUNDROBIN)) {
 		// Load balancing with memory == No roundrobin
@@ -220,19 +222,19 @@ int initial_server(int conn)
 int failover_server(int conn)
 {
 	int server = conns[conn].server;
-	DEBUG(2, "failover_server(%d)", conn);
+	DEBUG(2, "failover_server(%d): server = %d", conn, server);
 	if (server_alg & ALG_STUBBORN) {
 		DEBUG(2, "Won't failover because we are stubborn");
 		close_conn(conn);
 		return 0;
 	}
-	if (server == abuse_server) {
-		DEBUG(2, "Won't failover from abuse server");
+	if (server == ABUSE_SERVER) {
+		DEBUG(2, "Won't failover from abuse server (%d)", abuse_server);
 		close_conn(conn);
 		return 0;
 	}
-	if (server == emerg_server) {
-		DEBUG(2, "Already using emergency server, won't fail over");
+	if (server == EMERGENCY_SERVER) {
+		DEBUG(2, "Already using emergency server (%d), won't fail over", emerg_server);
 		close_conn(conn);
 		return 0;
 	}
