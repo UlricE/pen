@@ -1,4 +1,14 @@
 
+151029	In failover_server: changed abuse_server to ABUSE_SERVER and emerg_server
+	to EMERG_SERVER, to handle their default NO_SERVER values.
+	See issue #19 on Github.
+	Released 0.31.1.
+
+151012	At the suggestion from Marcos Vinicius Rogowski, the hash algorith
+	will now include the client port number if the -r (roundrobin)
+	option is used. See https://github.com/UlricE/pen/pull/18
+	Released 0.31.0.
+
 150915	Officially released 0.30.1.
 
 150909	Fixed IP-based client tracking.
