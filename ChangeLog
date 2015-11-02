@@ -1,8 +1,9 @@
 
+151102	In add_client: add the initial server to .client as well as .initial.
+
 151029	In failover_server: changed abuse_server to ABUSE_SERVER and emerg_server
 	to EMERG_SERVER, to handle their default NO_SERVER values.
 	See issue #19 on Github.
-	Released 0.31.1.
 
 151012	At the suggestion from Marcos Vinicius Rogowski, the hash algorith
 	will now include the client port number if the -r (roundrobin)

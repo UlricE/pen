@@ -1747,7 +1747,7 @@ static void add_client(int downfd, struct sockaddr_storage *cli_addr)
 		return;
 	}
 
-	conns[conn].initial = initial_server(conn);
+	conns[conn].initial = conns[conn].server = initial_server(conn);
 	if (conns[conn].initial == -1) {
 		DEBUG(1, "No initial server found, giving up");
 		close_conn(conn);
