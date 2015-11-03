@@ -54,7 +54,7 @@ static int pen_hash(struct sockaddr_storage *a)
 		if (server_alg & ALG_ROUNDROBIN) {
 			hash = (si->sin_addr.s_addr ^ si->sin_port) % (nservers?nservers:1);
 		} else {
-			hash = si->sin_addr.s_addr % (nservers?nserver:1);
+			hash = si->sin_addr.s_addr % (nservers?nservers:1);
 		}
 
 		DEBUG(2, "Hash: %d", hash);
@@ -243,7 +243,7 @@ int failover_server(int conn)
 		conns[conn].upfd = -1;
 	}
 	do {
-		server = (server+1) % (nservers?nserver:1);
+		server = (server+1) % (nservers?nservers:1);
 		DEBUG(2, "Intend to try server %d", server);
 		if (try_server(server, conn)) return 1;
 	} while (server != conns[conn].initial);
