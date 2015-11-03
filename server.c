@@ -52,9 +52,9 @@ static int pen_hash(struct sockaddr_storage *a)
 	case AF_INET:
 		si = (struct sockaddr_in *)a;
 		if (server_alg & ALG_ROUNDROBIN) {
-			hash = (si->sin_addr.s_addr ^ si->sin_port) % nservers;
+			hash = (si->sin_addr.s_addr ^ si->sin_port) % (nservers?nservers:1);
 		} else {
-			hash = si->sin_addr.s_addr % nservers;
+			hash = si->sin_addr.s_addr % (nservers?nserver:1);
 		}
 
 		DEBUG(2, "Hash: %d", hash);
@@ -64,7 +64,7 @@ static int pen_hash(struct sockaddr_storage *a)
 	case AF_INET6:
 		si6 = (struct sockaddr_in6 *)a;
 		u = (unsigned char *)(&si6->sin6_addr);
-		return u[15] % nservers;
+		return u[15] % (nservers?nservers:1);
 	default:
 		return 0;
 	}
@@ -181,7 +181,7 @@ int server_by_roundrobin(void)
 
 	if (nservers == 0) return NO_SERVER;
 	do {
-		i = (i+1) % nservers;
+		i = (i+1) % (nservers?nservers:1);
 		DEBUG(3, "server_by_roundrobin considering server %d", i);
 		if (!server_is_unavailable(i)) return (last_server = i);
 		DEBUG(3, "server %d is unavailable, try next one", i);
@@ -243,7 +243,7 @@ int failover_server(int conn)
 		conns[conn].upfd = -1;
 	}
 	do {
-		server = (server+1) % nservers;
+		server = (server+1) % (nservers?nserver:1);
 		DEBUG(2, "Intend to try server %d", server);
 		if (try_server(server, conn)) return 1;
 	} while (server != conns[conn].initial);
