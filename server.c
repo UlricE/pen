@@ -204,9 +204,9 @@ int initial_server(int conn)
 	if (!(server_alg & ALG_ROUNDROBIN)) {
 		// Load balancing with memory == No roundrobin
 		int server = clients[conns[conn].client].server;
-		DEBUG(2, "Will try previous server %d for client %d", server, conns[conn].client);
 		/* server may be NO_SERVER if this is a new client */
 		if (server != NO_SERVER && server != emerg_server && server != abuse_server) {
+			DEBUG(2, "Will try previous server %d for client %d", server, conns[conn].client);
 			return server;
 		}
 	}
@@ -242,11 +242,16 @@ int failover_server(int conn)
 		close(conns[conn].upfd);
 		conns[conn].upfd = -1;
 	}
-	do {
-		server = (server+1) % (nservers?nservers:1);
-		DEBUG(2, "Intend to try server %d", server);
-		if (try_server(server, conn)) return 1;
-	} while (server != conns[conn].initial);
+	/* there needs to be at least two regular servers in order to fail over to something else */
+	/* and if we couldn't find a candidate for initial_server, we're not going to find one now */
+	if (nservers > 1 && server != NO_SERVER) {
+		DEBUG(2, "Trying to find failover server. server = %d, initial = %d, nservers = %d", server, conns[conn].initial, nservers);
+		do {
+			server = (server+1) % nservers;
+			DEBUG(2, "Intend to try server %d", server);
+			if (try_server(server, conn)) return 1;
+		} while (server != conns[conn].initial);
+	}
 	DEBUG(1, "using emergency server, remember to reset flag");
 	emergency = 1;
 	if (try_server(emerg_server, conn)) return 1;
@@ -320,8 +325,11 @@ int try_server(int index, int conn)
 	   even if the server is close to its configured connection limit */
 	int sticky = ((client != -1) && (index == clients[client].server));
 
+	if (index == NO_SERVER) {
+		DEBUG(2, "Won't try to connect to NO_SERVER");
+		return 0;	/* out of bounds */
+	}
 	DEBUG(2, "Trying server %d for connection %d at time %d", index, conn, now);
-	if (index < 0) return 0;	/* out of bounds */
 	if (pen_getport(addr) == 0) {
 		DEBUG(1, "No port for you!");
 		return 0;

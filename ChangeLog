@@ -1,4 +1,6 @@
 
+151103	In failover_server: sanity checks to failover routine.
+
 151102	In add_client: add the initial server to .client as well as .initial.
 
 151029	In failover_server: changed abuse_server to ABUSE_SERVER and emerg_server
