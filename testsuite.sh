@@ -63,13 +63,6 @@ sample()
 	echo "$S"
 }
 
-check_empty()
-{
-	if test -z "$1"; then
-		fail "Result empty"
-	fi
-}
-
 check_result()
 {
 	echo "$1: expected '$2', got '$3'"
@@ -135,7 +128,7 @@ check_result "Second result" "$H1a" "$H1b"
 H2a=`$DIG @$IP2 -p 8080 example.com`
 check_different "Third result" "$H1a" "$H2a"
 H2b=`$DIG @$IP2 -p 8080 example.com`
-check_result "Fourth result" "$H2b" "$H2a"
+check_result "Fourth result" "$H2a" "$H2b"
 echo Success
 echo
 
@@ -257,7 +250,6 @@ H=`curl -sk https://127.0.0.1:1443/`
 check_result "First result" "100" "$H"
 echo Success
 
-# IPv6 testing suspended since we don't have IPv6 on this server
 # Absurdly, glibc requires an IPv6 address on a non-loopback interface
 # in order for getaddrinfo to handle IPv6. This can be accomplished thus:
 # /sbin/ifconfig eth1 add ::2/128
