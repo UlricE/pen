@@ -3,8 +3,8 @@
 # Some assembly required - see bottom of script.
 
 # We need two local ipv4 addresses, these should be available in a virtualbox vm
-#IP1=127.0.0.1
-#IP2=10.0.2.15
+IP1=127.0.0.1
+IP2=10.0.2.15
 # Otherwise put them in testsuite.cfg
 if test -s ./testsuite.cfg; then
 	. ./testsuite.cfg
