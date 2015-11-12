@@ -1,4 +1,6 @@
 
+151112	pen.1: removed obsolete -S option, updated defaults for -x and -L.
+
 151105	Released 0.31.1.
 
 151103	In failover_server: sanity checks to failover routine.

@@ -2298,11 +2298,7 @@ static int options(int argc, char **argv)
 			blacklist_time = atoi(optarg);
 			break;
 		case 'c':
-#if 0
-			clients_max = atoi(optarg);
-#else
 			expand_clienttable(atoi(optarg));
-#endif
 			break;
 		case 'd':
 			debuglevel++;
@@ -2375,11 +2371,7 @@ static int options(int argc, char **argv)
 #endif
 			break;
 		case 'x':
-#if 0
-			connections_max = atoi(optarg);
-#else
 			expand_conntable(atoi(optarg));
-#endif
 			break;
 		case 'w':
 			webfile = pen_strdup(optarg);

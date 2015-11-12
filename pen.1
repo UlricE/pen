@@ -6,7 +6,7 @@ pen - Load balancer for udp and tcp based protocols
 .SH SYNOPSIS
 .B pen
 .na
-[-b sec] [-S N] [-c N] [-e host:port] [-t sec] [-x N] [-j dir] [-u user] [-F cfgfile] [-l logfile] [-p file ] [-w file] [-C port|/path/to/socket] [-T sec] [-UHWXadfhrs] [-o option] [-E certfile] [-K keyfile] [-G cacertfile] [-A cacertdir] [-Z] [-R] [-L protocol] [host:]port|/path/to/socket h1[:p1[:maxc1[:hard1[:weight1[:prio1]]]]] [h2[:p2[:maxc2[:hard2[:weight2[:prio2]]]]]] ...
+[-b sec] [-c N] [-e host:port] [-t sec] [-x N] [-j dir] [-u user] [-F cfgfile] [-l logfile] [-p file ] [-w file] [-C port|/path/to/socket] [-T sec] [-UHWXadfhrs] [-o option] [-E certfile] [-K keyfile] [-G cacertfile] [-A cacertdir] [-Z] [-R] [-L protocol] [host:]port|/path/to/socket h1[:p1[:maxc1[:hard1[:weight1[:prio1]]]]] [h2[:p2[:maxc2[:hard2[:weight2[:prio2]]]]]] ...
 .ad
 
 Windows only:
@@ -115,9 +115,6 @@ server selection algorithm, for the specified number of seconds (default 30).
 -T \fIsec\fR
 Clients are tracked for the specified number of seconds so they can be sent to the same server as the last time (default 0 = never expire clients).
 .TP
--S \fIN\fR
-Max number of servers (default 16).
-.TP
 -c \fIN\fR
 Max number of clients (default 2048).
 .TP
@@ -173,7 +170,7 @@ Posix only. Run as a different user.
 Windows only. Uninstall the service.
 .TP
 -x \fIN\fR
-Max number of simultaneous connections (default 256).
+Max number of simultaneous connections (default 500).
 .TP
 -w \fIfile\fR
 File for status reports in HTML format.
@@ -200,7 +197,7 @@ Use SSL compatibility mode.
 Require valid peer certificate.
 .TP
 -L \fIprotocol\fR
-ssl23, ssl3 or tls1 (default).
+ssl23 (default), ssl3 or tls1.
 .TP
 [host:]port OR /path/to/socket
 The local address and port pen listens to. By default pen listens to
