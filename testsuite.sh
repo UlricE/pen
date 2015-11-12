@@ -272,6 +272,20 @@ start_pen "127.0.0.1:10000 [::1]:100"
 H=`curl -s4 http://127.0.0.1:10000/`
 check_result "First result" "100" "$H"
 echo Success
+
+echo
+echo "Testing signal handling"
+stop_pen
+echo "server 0 address 127.0.0.1 port 100" > autotest.cfg
+start_pen "10000 -F autotest.cfg"
+H=`curl -s http://127.0.0.1:10000/`
+check_result "First result" "100" "$H"
+echo "server 0 address 127.0.0.1 port 101" > autotest.cfg
+kill -HUP `cat $PID`
+H=`curl -s http://127.0.0.1:10000/`
+check_result "Second result" "101" "$H"
+echo Success
+
 stop_pen
 
 exit 0
