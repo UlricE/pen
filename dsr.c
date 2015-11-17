@@ -447,6 +447,7 @@ static int ipv4_frame(int fd, int n)
 	uint8_t ipv4_ihl;
 	uint16_t src_port, dst_port;
 	int server;
+	struct sockaddr_in dest;
 
 	DEBUG(2, "IPv4");
 	ipv4_ihl = ((*IPV4_IHL(buf)) & 0xf)*4;
@@ -455,12 +456,10 @@ static int ipv4_frame(int fd, int n)
 	DEBUG(2, "Protocol: %d / %s", ipv4_protocol, proto2str(ipv4_protocol));
 	DEBUG(2, "Sender IPv4 address: %s", inet_ntoa(*IPV4_SRC(buf)));
 	DEBUG(2, "Destination IPv4 address: %s", inet_ntoa(*IPV4_DST(buf)));
-#if 0
-	if (check_tarpit()) {
-		DEBUG(2, "Tarpitting");
-		return 0;
-	}
-#endif
+
+	dest.sin_family = AF_INET;
+	dest.sin_addr = *IPV4_DST(buf);
+
 	if (udp) {
 		DEBUG(3, "Doing udp");
 		if ((ipv4_protocol == 17) &&
@@ -487,26 +486,29 @@ static int ipv4_frame(int fd, int n)
 		}
 	} else {	/* not udp, i.e. tcp */
 		DEBUG(3, "Doing tcp");
-		if ((ipv4_protocol == 6) &&
-		    (*(uint32_t *)IPV4_DST(buf) == (uint32_t)our_ip_addr.s_addr)) {
-			DEBUG(2, "We should forward this.");
-			src_port = htons(*TCP_SRC_PORT(buf, ipv4_ihl));
-			dst_port = htons(*TCP_DST_PORT(buf, ipv4_ihl));
-			server = select_server(IPV4_SRC(buf), src_port);
-			if (server == NO_SERVER) {
-				debug("Dropping frame, nowhere to put it");
-				return -1;
-			}
-			if (!real_hw_known(server)) {
-				DEBUG(2, "Real hw addr unknown");
-				return -1;
-			}
-			DEBUG(2, "Source port = %d, destination port = %d",
-				src_port, dst_port);
-			if (port == 0 || dst_port == port) {
-				memcpy(MAC_DST(buf), servers[server].hwaddr, 6);
-				DEBUG(2, "Sending %d bytes", n);
-				n = send_packet(fd, buf, n);
+		if (ipv4_protocol == 6) {
+			if ((tarpit_acl != -1) && match_acl(tarpit_acl, (struct sockaddr_storage *)&dest)) {
+				DEBUG(2, "We should tarpit this");
+			} else if (*(uint32_t *)IPV4_DST(buf) == (uint32_t)our_ip_addr.s_addr) {
+				DEBUG(2, "We should forward this.");
+				src_port = htons(*TCP_SRC_PORT(buf, ipv4_ihl));
+				dst_port = htons(*TCP_DST_PORT(buf, ipv4_ihl));
+				server = select_server(IPV4_SRC(buf), src_port);
+				if (server == NO_SERVER) {
+					debug("Dropping frame, nowhere to put it");
+					return -1;
+				}
+				if (!real_hw_known(server)) {
+					DEBUG(2, "Real hw addr unknown");
+					return -1;
+				}
+				DEBUG(2, "Source port = %d, destination port = %d",
+					src_port, dst_port);
+				if (port == 0 || dst_port == port) {
+					memcpy(MAC_DST(buf), servers[server].hwaddr, 6);
+					DEBUG(2, "Sending %d bytes", n);
+					n = send_packet(fd, buf, n);
+				}
 			}
 		}
 	}
