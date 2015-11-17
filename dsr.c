@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include "acl.h"
 #include "pen.h"
 #include "diag.h"
 #include "memory.h"
@@ -282,7 +283,7 @@ static void store_hwaddr(struct in_addr *ip, uint8_t *hw)
 }
 
 /* returns 1 if this is an arp request for us, 0 otherwise */
-static int our_arp()
+static int our_arp(uint16_t arp_htype, uint16_t arp_ptype, uint16_t arp_oper)
 {
 	if ((arp_htype == 1) &&
 	    (arp_ptype == 0x0800) &&
@@ -295,7 +296,7 @@ static int our_arp()
 }
 
 /* returns 1 if the destination is a tarpit, 0 otherwise */
-static int check_tarpit()
+static int check_tarpit(void)
 {
 	struct sockaddr_in dest;
 	if (tarpit_acl == -1) return 0;	/* no tarpit acl defined */
@@ -322,7 +323,7 @@ static void arp_frame(int fd, int n)
 	DEBUG(2, "Sender protocol address: %s", inet_ntoa(*ARP_SPA(buf)));
 	DEBUG(2, "Target hardware address: %s", mac2str(ARP_THA(buf)));
 	DEBUG(2, "Target protocol address: %s", inet_ntoa(*ARP_TPA(buf)));
-	if (our_arp() || check_tarpit()) {
+	if (our_arp(arp_htype, arp_ptype, arp_oper) || check_tarpit()) {
 		hexdump(buf, n);
 		DEBUG(2, "We should reply to this.");
 		memcpy(MAC_DST(buf), ARP_SHA(buf), 6);
