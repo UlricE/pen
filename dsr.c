@@ -289,7 +289,7 @@ static int our_arp(uint16_t arp_htype, uint16_t arp_ptype, uint16_t arp_oper, st
 
 	if (memcmp(&dest->sin_addr.s_addr, &our_ip_addr, 4) == 0) return 1;
 
-	if (tarpit_acl != -1) return match_acl(tarpit_acl, (struct sockaddr_storage *)&dest);
+	if (tarpit_acl != -1) return match_acl(tarpit_acl, (struct sockaddr_storage *)dest);
 
 	return 0;
 }
