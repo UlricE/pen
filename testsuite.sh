@@ -286,6 +286,44 @@ H=`curl -s http://127.0.0.1:10000/`
 check_result "Second result" "101" "$H"
 echo Success
 
+# The next two tests, transparent reverse proxy and direct server return, require
+# extensive setting up. The are therefore conditioned on having separate config
+# in testsuite.cfg. Mine looks like this (only not commented out):
+
+#TRP_PEN=192.168.1.2
+#TRP_BACK1=192.168.2.2
+#TRP_BACK2=192.168.2.3
+#TRP_MYIP=192.168.1.1
+
+#DSR_PEN=192.168.1.3
+#DSR_IP=192.168.2.10
+#DSR_BACK1=$TRP_BACK1
+#DSR_BACK2=$TRP_BACK2
+#DSR_MYIP=$TRP_MYIP
+
+if test ! -z "$TRP_PEN"; then
+	echo
+	echo "Testing Transparent Reverse Proxy"
+	stop_pen
+	ssh root@$TRP_PEN "cd Git/pen && git pull && make && killall pen ; ./pen -r -O transparent 80 $TRP_BACK1 $TRP_BACK2"
+	H=`curl -s http://$TRP_PEN/cgi-bin/remote_addr`
+	check_result "Transparent result" "$TRP_MYIP" "$H"
+	ssh root@$TRP_PEN "cd Git/pen && killall pen ; ./pen -r 80 $TRP_BACK1 $TRP_BACK2"
+	H=`curl -s http://$TRP_PEN/cgi-bin/remote_addr`
+	check_different "Nontransparent result" "$TRP_MYIP" "$H"
+	echo Success
+fi
+
+if test ! -z "$DSR_PEN"; then
+	echo
+	echo "Testing Direct Server Return"
+	stop_pen
+	ssh root@$DSR_PEN "cd Git/pen && git pull && make && killall pen ; ./pen -r -O 'dsr_if eth1' $DSR_IP:80 $DSR_BACK1 $DSR_BACK2"
+	H=`curl -s http://$DSR_IP/cgi-bin/remote_addr`
+	check_result "First result" "$DSR_MYIP" "$H"
+	echo Success
+fi
+
 stop_pen
 
 exit 0
