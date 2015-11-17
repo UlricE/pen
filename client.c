@@ -13,6 +13,7 @@
 
 client *clients;
 int clients_max = 0;
+int client_acl;
 
 /* Store client and return index */
 int store_client(struct sockaddr_storage *cli)

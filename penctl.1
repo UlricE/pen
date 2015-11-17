@@ -226,6 +226,9 @@ If the initial server selection is unavailable, close the client connection with
 .TP
 \fIno stubborn\fR
 .TP
+\fItarpit_acl [N]\fR
+Used in DSR mode. If N is an existing access list, Pen will reply to ARP requests for IP addresses that match the access list, and reply with SYN+ACK to TCP SYN requests to these addresses. The result is that someone trying to scan a network will be slowed down by a large number of false positives.
+.TP
 \fItcp_fastclose up|down|both|off\fR
 Close both sockets to upstream and downstream if one of them closes theirs. Default = off.
 .TP

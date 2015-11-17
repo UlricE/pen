@@ -22,6 +22,8 @@
 #include <net/if.h>
 #include <arpa/inet.h>
 
+int tarpit_acl = -1;
+
 static char *mac2str(unsigned char *b)
 {
 	static char p[100];
@@ -279,6 +281,29 @@ static void store_hwaddr(struct in_addr *ip, uint8_t *hw)
 	}
 }
 
+/* returns 1 if this is an arp request for us, 0 otherwise */
+static int our_arp()
+{
+	if ((arp_htype == 1) &&
+	    (arp_ptype == 0x0800) &&
+	    (arp_oper == 1) &&
+	    (memcmp(ARP_TPA(buf), &our_ip_addr, sizeof *ARP_TPA(buf)) == 0)) {
+		return 1;
+	} else {
+		return 0;
+	}
+}
+
+/* returns 1 if the destination is a tarpit, 0 otherwise */
+static int check_tarpit()
+{
+	struct sockaddr_in dest;
+	if (tarpit_acl == -1) return 0;	/* no tarpit acl defined */
+	dest.sin_family = AF_INET;
+	memcpy(&dest.sin_addr.s_addr, ARP_TPA(buf), 4);
+	return match_acl(tarpit_acl, (struct sockaddr_storage *)&dest);
+}
+
 static void arp_frame(int fd, int n)
 {
 	uint16_t arp_htype, arp_ptype, arp_oper;
@@ -297,10 +322,7 @@ static void arp_frame(int fd, int n)
 	DEBUG(2, "Sender protocol address: %s", inet_ntoa(*ARP_SPA(buf)));
 	DEBUG(2, "Target hardware address: %s", mac2str(ARP_THA(buf)));
 	DEBUG(2, "Target protocol address: %s", inet_ntoa(*ARP_TPA(buf)));
-	if ((arp_htype == 1) &&
-	    (arp_ptype == 0x0800) &&
-	    (arp_oper == 1) &&
-	    (memcmp(ARP_TPA(buf), &our_ip_addr, sizeof *ARP_TPA(buf)) == 0)) {
+	if (our_arp() || check_tarpit()) {
 		hexdump(buf, n);
 		DEBUG(2, "We should reply to this.");
 		memcpy(MAC_DST(buf), ARP_SHA(buf), 6);

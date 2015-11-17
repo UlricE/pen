@@ -105,6 +105,7 @@ static char *webfile = NULL;
 static char listenport[1000];
 static int port;
 
+static int control_acl;
 static char *ctrlport = NULL;
 int listenfd;
 static int ctrlfd = -1;
@@ -1592,6 +1593,12 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		} else {
 			tcp_fastclose = 0;
 		}
+	} else if (!strcmp(p, "tarpit_acl")) {
+		p = strtok(NULL, " ");
+		if (p) tarpit_acl = atoi(p);
+		if (tarpit_acl < -1 || tarpit_acl >= ACLS_MAX)
+			tarpit_acl = 0;
+		output(op, "tarpit_acl = %d", tarpit_acl);
 	} else if (!strcmp(p, "tcp_nodelay")) {
 		tcp_nodelay = 1;
 	} else if (!strcmp(p, "timeout")) {
