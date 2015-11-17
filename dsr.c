@@ -324,8 +324,8 @@ static void arp_frame(int fd, int n)
 		memcpy(ARP_THA(buf), ARP_SHA(buf), 6);
 		memcpy(ARP_TPA(buf), ARP_SPA(buf), 4);
 		memcpy(ARP_SHA(buf), our_hw_addr, 6);
-//		memcpy(ARP_SPA(buf), &our_ip_addr, 4);
-		memcpy(ARP_SPA(buf), &dest, 4);
+		memcpy(ARP_SPA(buf), &our_ip_addr, 4);
+//		memcpy(ARP_SPA(buf), &dest, 4);
 		DEBUG(2, "Sending %d bytes", n);
 		n = send_packet(fd, buf, n);
 	} else if ((arp_htype == 1) &&
