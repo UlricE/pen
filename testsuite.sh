@@ -288,7 +288,7 @@ echo Success
 
 # The next two tests, transparent reverse proxy and direct server return, require
 # extensive setting up. The are therefore conditioned on having separate config
-# in testsuite.cfg. Mine looks like this (only not commented out):
+# in testsuite.cfg. It might look something like this (only not commented out):
 
 #TRP_PEN=192.168.1.2
 #TRP_BACK1=192.168.2.2
