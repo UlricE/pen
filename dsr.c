@@ -283,31 +283,23 @@ static void store_hwaddr(struct in_addr *ip, uint8_t *hw)
 }
 
 /* returns 1 if this is an arp request for us, 0 otherwise */
-static int our_arp(uint16_t arp_htype, uint16_t arp_ptype, uint16_t arp_oper)
+static int our_arp(uint16_t arp_htype, uint16_t arp_ptype, uint16_t arp_oper, struct sockaddr_in *dest)
 {
-	if ((arp_htype == 1) &&
-	    (arp_ptype == 0x0800) &&
-	    (arp_oper == 1) &&
-	    (memcmp(ARP_TPA(buf), &our_ip_addr, sizeof *ARP_TPA(buf)) == 0)) {
-		return 1;
-	} else {
-		return 0;
-	}
-}
+	if ((arp_htype != 1) || (arp_ptype != 0x0800) || (arp_oper != 1)) return 0;
 
-/* returns 1 if the destination is a tarpit, 0 otherwise */
-static int check_tarpit(void)
-{
-	struct sockaddr_in dest;
-	if (tarpit_acl == -1) return 0;	/* no tarpit acl defined */
-	dest.sin_family = AF_INET;
-	memcpy(&dest.sin_addr.s_addr, ARP_TPA(buf), 4);
-	return match_acl(tarpit_acl, (struct sockaddr_storage *)&dest);
+	if (memcmp(&dest->sin_addr.s_addr, &our_ip_addr, 4) == 0) return 1;
+
+	if (tarpit_acl != -1) return match_acl(tarpit_acl, (struct sockaddr_storage *)&dest);
+
+	return 0;
 }
 
 static void arp_frame(int fd, int n)
 {
 	uint16_t arp_htype, arp_ptype, arp_oper;
+	struct sockaddr_in dest;
+	memcpy(&dest.sin_addr.s_addr, ARP_TPA(buf), 4);
+	dest.sin_family = AF_INET;
 	DEBUG(2, "ARP");
 	arp_htype = ntohs(*ARP_HTYPE(buf));
 	arp_ptype = ntohs(*ARP_PTYPE(buf));
@@ -323,7 +315,7 @@ static void arp_frame(int fd, int n)
 	DEBUG(2, "Sender protocol address: %s", inet_ntoa(*ARP_SPA(buf)));
 	DEBUG(2, "Target hardware address: %s", mac2str(ARP_THA(buf)));
 	DEBUG(2, "Target protocol address: %s", inet_ntoa(*ARP_TPA(buf)));
-	if (our_arp(arp_htype, arp_ptype, arp_oper) || check_tarpit()) {
+	if (our_arp(arp_htype, arp_ptype, arp_oper, &dest)) {
 		hexdump(buf, n);
 		DEBUG(2, "We should reply to this.");
 		memcpy(MAC_DST(buf), ARP_SHA(buf), 6);
@@ -332,7 +324,8 @@ static void arp_frame(int fd, int n)
 		memcpy(ARP_THA(buf), ARP_SHA(buf), 6);
 		memcpy(ARP_TPA(buf), ARP_SPA(buf), 4);
 		memcpy(ARP_SHA(buf), our_hw_addr, 6);
-		memcpy(ARP_SPA(buf), &our_ip_addr, 4);
+//		memcpy(ARP_SPA(buf), &our_ip_addr, 4);
+		memcpy(ARP_SPA(buf), &dest, 4);
 		DEBUG(2, "Sending %d bytes", n);
 		n = send_packet(fd, buf, n);
 	} else if ((arp_htype == 1) &&
@@ -462,6 +455,12 @@ static int ipv4_frame(int fd, int n)
 	DEBUG(2, "Protocol: %d / %s", ipv4_protocol, proto2str(ipv4_protocol));
 	DEBUG(2, "Sender IPv4 address: %s", inet_ntoa(*IPV4_SRC(buf)));
 	DEBUG(2, "Destination IPv4 address: %s", inet_ntoa(*IPV4_DST(buf)));
+#if 0
+	if (check_tarpit()) {
+		DEBUG(2, "Tarpitting");
+		return 0;
+	}
+#endif
 	if (udp) {
 		DEBUG(3, "Doing udp");
 		if ((ipv4_protocol == 17) &&
