@@ -493,6 +493,7 @@ static int ipv4_frame(int fd, int n)
 				unsigned char src_mac[6];
 				uint32_t seq_nr;
 				uint16_t flags = *TCP_FLAGS(buf, ipv4_ihl);
+				DEBUG(2, "Tarpitting: flags = 0x%x");
 				if ((flags & 0x0002) == 0) return 0;		/* not SYN */
 				DEBUG(2, "We should tarpit this");
 				*TCP_FLAGS(buf, ipv4_ihl) = (flags | 0x0010);	/* ACK */
