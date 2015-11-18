@@ -438,6 +438,7 @@ static int select_server(struct in_addr *a, uint16_t port)
 #define TCP_SEQ_NR(f, i) (uint32_t *)(TCP_SEGMENT(f, i)+4)
 #define TCP_ACK_NR(f, i) (uint32_t *)(TCP_SEGMENT(f, i)+8)
 #define TCP_FLAGS(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+12)
+#define TCP_OPTIONS(f, i) (uint8_t *)(TCP_SEGMENT(f, i)+20)
 
 #define UDP_SEGMENT(f, i) (PAYLOAD(f)+i)
 #define UDP_SRC_PORT(f, i) (uint16_t *)(UDP_SEGMENT(f, i))
@@ -509,6 +510,12 @@ static int ipv4_frame(int fd, int n)
 				seq_nr = ntohl(*TCP_SEQ_NR(buf, ipv4_ihl));
 				*TCP_SEQ_NR(buf, ipv4_ihl) = htonl(42);	/* our random number */
 				*TCP_ACK_NR(buf, ipv4_ihl) = htonl(seq_nr+1);
+				/* figure out timestamps */
+				uint8_t offset = (flags >> 24);
+				DEBUG(2, "Offset = %d", offset);
+				uint8_t *options = TCP_OPTIONS(buf, ipv4_ihl);
+				DEBUG(2, "Options start at %p", options);
+
 				n = send_packet(fd, buf, n);
 			} else if (*(uint32_t *)IPV4_DST(buf) == (uint32_t)our_ip_addr.s_addr) {
 				DEBUG(2, "We should forward this.");
