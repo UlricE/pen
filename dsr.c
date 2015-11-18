@@ -516,17 +516,21 @@ static int ipv4_frame(int fd, int n)
 				DEBUG(2, "Offset = %d => %d bytes of options", offset, 4*(offset-5));
 				uint8_t *options = TCP_OPTIONS(buf, ipv4_ihl);
 				DEBUG(2, "Options start at %p", options);
-				for (i = 0; i < 4*(offset-5); i++) {
+				i = 0;
+				while (i < 4*(offset-5)) {
 					DEBUG(2, "%02x", options[i]);
 					if (options[i] == 0) {	/* end of options */
 						break;
-					} else if (options[i] == 1) { /* noop */
-						continue;
+					} else if (options[i] == 1) { 	/* noop */
+						i++;
 					} else if (options[i] == 8) {	/* timestamp */
 						uint32_t timestamp = ntohl(*(uint32_t *)(options+i+2));
 						DEBUG(2, "Timestamp = %ld", timestamp);
 						*(uint32_t *)(options+i+2+4) = htonl(timestamp);
+						i = i+2+options[i+1];
 						break;
+					} else {
+						i += i+2+options[i+1];
 					}
 				}
 				n = send_packet(fd, buf, n);
