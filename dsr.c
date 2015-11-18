@@ -518,8 +518,17 @@ static int ipv4_frame(int fd, int n)
 				DEBUG(2, "Options start at %p", options);
 				for (i = 0; i < 4*(offset-5); i++) {
 					DEBUG(2, "%02x", options[i]);
+					if (options[i] == 0) {	/* end of options */
+						break;
+					} else if (options[i] == 1) { /* noop */
+						continue;
+					} else if (options[i] == 8) {	/* timestamp */
+						uint32_t timestamp = ntohl(*(uint32_t *)(options+i+2));
+						DEBUG(2, "Timestamp = %ld", timestamp);
+						*(uint32_t *)(options+i+2+4) = htonl(timestamp);
+						break;
+					}
 				}
-
 				n = send_packet(fd, buf, n);
 			} else if (*(uint32_t *)IPV4_DST(buf) == (uint32_t)our_ip_addr.s_addr) {
 				DEBUG(2, "We should forward this.");
