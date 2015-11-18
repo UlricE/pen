@@ -492,11 +492,11 @@ static int ipv4_frame(int fd, int n)
 			if (match_acl(tarpit_acl, (struct sockaddr_storage *)&dest)) {
 				unsigned char src_mac[6];
 				uint32_t seq_nr;
-				uint16_t flags = *TCP_FLAGS(buf, ipv4_ihl);
+				uint16_t flags = ntohs(*TCP_FLAGS(buf, ipv4_ihl));
 				DEBUG(2, "Tarpitting: flags = 0x%x");
 				if ((flags & 0x0002) == 0) return 0;		/* not SYN */
 				DEBUG(2, "We should tarpit this");
-				*TCP_FLAGS(buf, ipv4_ihl) = (flags | 0x0010);	/* ACK */
+				*TCP_FLAGS(buf, ipv4_ihl) = htons(flags | 0x0010);	/* ACK */
 				/* basically reverse everything to make the syn+ack frame */
 				memcpy(src_mac, MAC_SRC(buf), 6);
 				memcpy(MAC_SRC(buf), MAC_DST(buf), 6);
@@ -506,9 +506,9 @@ static int ipv4_frame(int fd, int n)
 				src_port = ntohs(*TCP_SRC_PORT(buf, ipv4_ihl));
 				*TCP_SRC_PORT(buf, ipv4_ihl) = *TCP_DST_PORT(buf, ipv4_ihl);
 				*TCP_DST_PORT(buf, ipv4_ihl) = htons(src_port);
-				seq_nr = *TCP_SEQ_NR(buf, ipv4_ihl);
-				*TCP_SEQ_NR(buf, ipv4_ihl) = 42;	/* our random number */
-				*TCP_ACK_NR(buf, ipv4_ihl) = seq_nr+1;
+				seq_nr = ntohl(*TCP_SEQ_NR(buf, ipv4_ihl));
+				*TCP_SEQ_NR(buf, ipv4_ihl) = htonl(42);	/* our random number */
+				*TCP_ACK_NR(buf, ipv4_ihl) = htonl(seq_nr+1);
 				n = send_packet(fd, buf, n);
 			} else if (*(uint32_t *)IPV4_DST(buf) == (uint32_t)our_ip_addr.s_addr) {
 				DEBUG(2, "We should forward this.");
