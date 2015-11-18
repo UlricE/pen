@@ -289,9 +289,7 @@ static int our_arp(uint16_t arp_htype, uint16_t arp_ptype, uint16_t arp_oper, st
 
 	if (memcmp(&dest->sin_addr.s_addr, &our_ip_addr, 4) == 0) return 1;
 
-	if (tarpit_acl != -1) return match_acl(tarpit_acl, (struct sockaddr_storage *)dest);
-
-	return 0;
+	return match_acl(tarpit_acl, (struct sockaddr_storage *)dest);
 }
 
 static void arp_frame(int fd, int n)
@@ -437,6 +435,10 @@ static int select_server(struct in_addr *a, uint16_t port)
 #define TCP_SEGMENT(f, i) (PAYLOAD(f)+i)
 #define TCP_SRC_PORT(f, i) (uint16_t *)(TCP_SEGMENT(f, i))
 #define TCP_DST_PORT(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+2)
+#define TCP_SEQ_NR(f, i) (uint32_t *)(TCP_SEGMENT(f, i)+4)
+#define TCP_ACK_NR(f, i) (uint32_t *)(TCP_SEGMENT(f, i)+8)
+#define TCP_FLAGS(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+12)
+
 #define UDP_SEGMENT(f, i) (PAYLOAD(f)+i)
 #define UDP_SRC_PORT(f, i) (uint16_t *)(UDP_SEGMENT(f, i))
 #define UDP_DST_PORT(f, i) (uint16_t *)(UDP_SEGMENT(f, i)+2)
@@ -487,12 +489,30 @@ static int ipv4_frame(int fd, int n)
 	} else {	/* not udp, i.e. tcp */
 		DEBUG(3, "Doing tcp");
 		if (ipv4_protocol == 6) {
-			if ((tarpit_acl != -1) && match_acl(tarpit_acl, (struct sockaddr_storage *)&dest)) {
+			if (match_acl(tarpit_acl, (struct sockaddr_storage *)&dest)) {
+				unsigned char src_mac[6];
+				uint32_t seq_nr;
+				uint16_t flags = *TCP_FLAGS(buf, ipv4_ihl);
+				if ((flags & 0x0002) == 0) return 0;		/* not SYN */
 				DEBUG(2, "We should tarpit this");
+				*TCP_FLAGS(buf, ipv4_ihl) = (flags | 0x0010);	/* ACK */
+				/* basically reverse everything to make the syn+ack frame */
+				memcpy(src_mac, MAC_SRC(buf), 6);
+				memcpy(MAC_SRC(buf), MAC_DST(buf), 6);
+				memcpy(MAC_DST(buf), src_mac, 6);
+				*IPV4_DST(buf) = *IPV4_SRC(buf);
+				*IPV4_SRC(buf) = dest.sin_addr;
+				src_port = ntohs(*TCP_SRC_PORT(buf, ipv4_ihl));
+				*TCP_SRC_PORT(buf, ipv4_ihl) = *TCP_DST_PORT(buf, ipv4_ihl);
+				*TCP_DST_PORT(buf, ipv4_ihl) = htons(src_port);
+				seq_nr = *TCP_SEQ_NR(buf, ipv4_ihl);
+				*TCP_SEQ_NR(buf, ipv4_ihl) = 42;	/* our random number */
+				*TCP_ACK_NR(buf, ipv4_ihl) = seq_nr+1;
+				n = send_packet(fd, buf, n);
 			} else if (*(uint32_t *)IPV4_DST(buf) == (uint32_t)our_ip_addr.s_addr) {
 				DEBUG(2, "We should forward this.");
-				src_port = htons(*TCP_SRC_PORT(buf, ipv4_ihl));
-				dst_port = htons(*TCP_DST_PORT(buf, ipv4_ihl));
+				src_port = ntohs(*TCP_SRC_PORT(buf, ipv4_ihl));
+				dst_port = ntohs(*TCP_DST_PORT(buf, ipv4_ihl));
 				server = select_server(IPV4_SRC(buf), src_port);
 				if (server == NO_SERVER) {
 					debug("Dropping frame, nowhere to put it");
