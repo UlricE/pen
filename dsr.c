@@ -518,19 +518,27 @@ static int ipv4_frame(int fd, int n)
 				DEBUG(2, "Options start at %p", options);
 				i = 0;
 				while (i < 4*(offset-5)) {
+					uint8_t kind, length;
+					kind = options[i];
+					length = 1;
 					DEBUG(2, "%02x", options[i]);
-					if (options[i] == 0) {	/* end of options */
+					if (kind == 0) {	/* end of options */
+						DEBUG(2, "End of options");
 						break;
 					} else if (options[i] == 1) { 	/* noop */
+						DEBUG(2, "Noop");
 						i++;
 					} else if (options[i] == 8) {	/* timestamp */
+						length = options[i+1];
 						uint32_t timestamp = ntohl(*(uint32_t *)(options+i+2));
-						DEBUG(2, "Timestamp = %ld", timestamp);
+						DEBUG(2, "Timestamp = %ld, length = %d", timestamp, length);
 						*(uint32_t *)(options+i+2+4) = htonl(timestamp);
-						i = i+2+options[i+1];
+						i = i+length+2;
 						break;
 					} else {
-						i += i+2+options[i+1];
+						length = options[i+1];
+						DEBUG(2, "Kind = %d, length = %d", kind, length);
+						i += i+length+2;
 					}
 				}
 				n = send_packet(fd, buf, n);
