@@ -533,12 +533,12 @@ static int ipv4_frame(int fd, int n)
 						uint32_t timestamp = ntohl(*(uint32_t *)(options+i+2));
 						DEBUG(2, "Timestamp = %ld, length = %d", timestamp, length);
 						*(uint32_t *)(options+i+2+4) = htonl(timestamp);
-						i = i+length+2;
+						i = i+length;
 						break;
 					} else {
 						length = options[i+1];
 						DEBUG(2, "Kind = %d, length = %d", kind, length);
-						i += i+length+2;
+						i += i+length;
 					}
 				}
 				n = send_packet(fd, buf, n);
