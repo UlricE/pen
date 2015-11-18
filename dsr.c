@@ -438,11 +438,20 @@ static int select_server(struct in_addr *a, uint16_t port)
 #define TCP_SEQ_NR(f, i) (uint32_t *)(TCP_SEGMENT(f, i)+4)
 #define TCP_ACK_NR(f, i) (uint32_t *)(TCP_SEGMENT(f, i)+8)
 #define TCP_FLAGS(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+12)
+#define TCP_WINDOW(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+14)
+#define TCP_CHECKSUM(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+16)
+#define TCP_URGENT(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+18)
 #define TCP_OPTIONS(f, i) (uint8_t *)(TCP_SEGMENT(f, i)+20)
 
 #define UDP_SEGMENT(f, i) (PAYLOAD(f)+i)
 #define UDP_SRC_PORT(f, i) (uint16_t *)(UDP_SEGMENT(f, i))
 #define UDP_DST_PORT(f, i) (uint16_t *)(UDP_SEGMENT(f, i)+2)
+
+struct ptcp_header {
+	uint32_t src, dst;
+	uint8_t zero, protocol;
+	uint16_t length;
+};
 
 static int ipv4_frame(int fd, int n)
 {
@@ -491,56 +500,65 @@ static int ipv4_frame(int fd, int n)
 		DEBUG(3, "Doing tcp");
 		if (ipv4_protocol == 6) {
 			if (match_acl(tarpit_acl, (struct sockaddr_storage *)&dest)) {
+				struct ptcp_header ph;
 				int i;
 				unsigned char src_mac[6];
 				uint32_t seq_nr;
 				uint16_t flags = ntohs(*TCP_FLAGS(buf, ipv4_ihl));
+				uint32_t checksum;
+				uint16_t *csp;
 
 				DEBUG(2, "Tarpitting: flags = 0x%x");
 				if ((flags & 0x0002) == 0) return 0;		/* not SYN */
+				/* fill in the pseudo header fields */
+				memcpy(&ph.src, IPV4_DST(buf), 4);
+				memcpy(&ph.dst, IPV4_SRC(buf), 4);
+				ph.zero = 0;		/* :P */
+				ph.protocol = 6;	/* tcp */
+				ph.length = htons(40);		/* 5 32-bit words */
+
 				DEBUG(2, "We should tarpit this");
-				*TCP_FLAGS(buf, ipv4_ihl) = htons(flags | 0x0010);	/* ACK */
-				/* basically reverse everything to make the syn+ack frame */
+				/* reverse everything to make the syn+ack frame */
+				/* reverse mac addresses */
 				memcpy(src_mac, MAC_SRC(buf), 6);
 				memcpy(MAC_SRC(buf), MAC_DST(buf), 6);
 				memcpy(MAC_DST(buf), src_mac, 6);
+				/* reverse ip addresses */
 				*IPV4_DST(buf) = *IPV4_SRC(buf);
 				*IPV4_SRC(buf) = dest.sin_addr;
+				/* reverse port numbers */
 				src_port = ntohs(*TCP_SRC_PORT(buf, ipv4_ihl));
 				*TCP_SRC_PORT(buf, ipv4_ihl) = *TCP_DST_PORT(buf, ipv4_ihl);
 				*TCP_DST_PORT(buf, ipv4_ihl) = htons(src_port);
+				/* reverse sequence numbers */
 				seq_nr = ntohl(*TCP_SEQ_NR(buf, ipv4_ihl));
 				*TCP_SEQ_NR(buf, ipv4_ihl) = htonl(42);	/* our random number */
 				*TCP_ACK_NR(buf, ipv4_ihl) = htonl(seq_nr+1);
-				/* figure out timestamps */
+				/* 5 words of tcp header and SYN+ACK */
+				*TCP_FLAGS(buf, ipv4_ihl) = htons((5 << 12) | 0x0012);
+				*TCP_CHECKSUM(buf, ipv4_ihl) = 0;
+				*TCP_URGENT(buf, ipv4_ihl) = 0;
+				checksum = 0;
+				csp = (uint16_t *)&ph;
+				for (i = 0; i < 6; i++) {
+					checksum += ntohs(csp[i]);
+				}
+				csp = (uint16_t *)TCP_SRC_PORT(buf, ipv4_ihl);
+				for (i = 0; i < 10; i++) {
+					checksum += ntohs(csp[i]);
+				}
+				checksum = (checksum & 0xffff) + (checksum >> 16);
+				checksum ^= 0xffff;
+				*TCP_CHECKSUM(buf, ipv4_ihl) = htons(checksum);
+				DEBUG(2, "Checksum = 0x%x", checksum);
+				/* ignore options */
 				uint8_t offset = (flags >> 12);
 				DEBUG(2, "Offset = %d => %d bytes of options", offset, 4*(offset-5));
 				uint8_t *options = TCP_OPTIONS(buf, ipv4_ihl);
 				DEBUG(2, "Options start at %p", options);
 				i = 0;
-				while (i < 4*(offset-5)) {
-					uint8_t kind, length;
-					kind = options[i];
-					length = 1;
-					DEBUG(2, "%02x", options[i]);
-					if (kind == 0) {	/* end of options */
-						DEBUG(2, "End of options");
-						break;
-					} else if (options[i] == 1) { 	/* noop */
-						DEBUG(2, "Noop");
-						i++;
-					} else if (options[i] == 8) {	/* timestamp */
-						length = options[i+1];
-						uint32_t timestamp = ntohl(*(uint32_t *)(options+i+2));
-						DEBUG(2, "Timestamp = %ld, length = %d", timestamp, length);
-						*(uint32_t *)(options+i+2+4) = htonl(timestamp);
-						i = i+length;
-						break;
-					} else {
-						length = options[i+1];
-						DEBUG(2, "Kind = %d, length = %d", kind, length);
-						i = i+length;
-					}
+				for (i = 0; i < 4*(offset-5); i++) {
+					options[i] = 0;
 				}
 				n = send_packet(fd, buf, n);
 			} else if (*(uint32_t *)IPV4_DST(buf) == (uint32_t)our_ip_addr.s_addr) {
