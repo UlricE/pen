@@ -511,7 +511,7 @@ static int ipv4_frame(int fd, int n)
 				*TCP_SEQ_NR(buf, ipv4_ihl) = htonl(42);	/* our random number */
 				*TCP_ACK_NR(buf, ipv4_ihl) = htonl(seq_nr+1);
 				/* figure out timestamps */
-				uint8_t offset = (flags >> 24);
+				uint8_t offset = (flags >> 12);
 				DEBUG(2, "Offset = %d", offset);
 				uint8_t *options = TCP_OPTIONS(buf, ipv4_ihl);
 				DEBUG(2, "Options start at %p", options);
