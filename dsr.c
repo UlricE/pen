@@ -491,6 +491,7 @@ static int ipv4_frame(int fd, int n)
 		DEBUG(3, "Doing tcp");
 		if (ipv4_protocol == 6) {
 			if (match_acl(tarpit_acl, (struct sockaddr_storage *)&dest)) {
+				int i;
 				unsigned char src_mac[6];
 				uint32_t seq_nr;
 				uint16_t flags = ntohs(*TCP_FLAGS(buf, ipv4_ihl));
@@ -515,6 +516,9 @@ static int ipv4_frame(int fd, int n)
 				DEBUG(2, "Offset = %d => %d bytes of options", offset, 4*(offset-5));
 				uint8_t *options = TCP_OPTIONS(buf, ipv4_ihl);
 				DEBUG(2, "Options start at %p", options);
+				for (i = 0; i < 4*(offset-5); i++) {
+					DEBUG(2, "%02x", options[i]);
+				}
 
 				n = send_packet(fd, buf, n);
 			} else if (*(uint32_t *)IPV4_DST(buf) == (uint32_t)our_ip_addr.s_addr) {
