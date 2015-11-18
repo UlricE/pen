@@ -538,7 +538,7 @@ static int ipv4_frame(int fd, int n)
 					} else {
 						length = options[i+1];
 						DEBUG(2, "Kind = %d, length = %d", kind, length);
-						i += i+length;
+						i = i+length;
 					}
 				}
 				n = send_packet(fd, buf, n);
