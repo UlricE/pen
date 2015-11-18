@@ -34,7 +34,7 @@ typedef struct {
 	} ace;
 } acl;
 
-extern int client_acl, tarpit_acl;
+extern int client_acl;
 
 extern void add_acl_ipv4(int, unsigned int, unsigned int, unsigned char);
 extern void add_acl_ipv6(int, unsigned char *, unsigned char, unsigned char);
