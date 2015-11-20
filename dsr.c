@@ -9,6 +9,8 @@
 #include "server.h"
 #include "settings.h"
 
+int tarpit_acl = -1;
+
 #if defined(HAVE_LINUX_IF_PACKET_H) || defined(HAVE_NET_NETMAP_USER_H)
 #include <stdlib.h>
 #include <stdio.h>
@@ -22,8 +24,6 @@
 #include <netinet/in.h>
 #include <net/if.h>
 #include <arpa/inet.h>
-
-int tarpit_acl = -1;
 
 static char *mac2str(unsigned char *b)
 {
