@@ -300,6 +300,7 @@ echo Success
 #DSR_BACK1=$TRP_BACK1
 #DSR_BACK2=$TRP_BACK2
 #DSR_MYIP=$TRP_MYIP
+#TARPIT_IP=192.168.2.11
 
 if test ! -z "$TRP_PEN"; then
 	echo
@@ -316,11 +317,23 @@ fi
 
 if test ! -z "$DSR_PEN"; then
 	echo
-	echo "Testing Direct Server Return"
+	echo "Testing Direct Server Return and Tarpit"
 	stop_pen
-	ssh root@$DSR_PEN "cd Git/pen && git pull && make && killall pen ; ./pen -r -O 'dsr_if eth1' $DSR_IP:80 $DSR_BACK1 $DSR_BACK2"
+	ssh root@$DSR_PEN "cd Git/pen && git pull && make && killall pen ; ./pen -r -O 'acl 1 permit $TARPIT_IP' -O 'tarpit_acl 1' -O 'dsr_if eth1' $DSR_IP:80 $DSR_BACK1 $DSR_BACK2"
+	echo
+	H=`nmap -p 80 $TARPIT_IP|grep ^80/tcp|awk '{print $2}'`
+	check_result "Nmap result from legitimate address" "open" "$H"
 	H=`curl -s http://$DSR_IP/cgi-bin/remote_addr`
-	check_result "First result" "$DSR_MYIP" "$H"
+	check_result "Curl result from legitimate address" "$DSR_MYIP" "$H"
+	H=`nmap -p 80 $TARPIT_IP|grep ^80/tcp|awk '{print $2}'`
+	check_result "Nmap result from tarpitted address" "open" "$H"
+	H=`curl -s -m 3 http://$TARPIT_IP/cgi-bin/remote_addr`
+	E=$?
+	echo "Curl exit code: $E"
+	echo "Curl result from tarpitted address: $H"
+	if test "$E" = "0"; then
+		fail "Wrong curl exit code"
+	fi
 	echo Success
 fi
 
