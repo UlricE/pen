@@ -75,6 +75,8 @@ static int epoll_event_fd(int *revents)
 	DEBUG(3, "\tepoll_ev[%d] = {revents=%d, data.fd=%d}", pindex, epoll_ev[pindex].events, epoll_ev[pindex].data.fd);
         if (epoll_ev[pindex].events & EPOLLIN) events |= EVENT_READ;
 	if (epoll_ev[pindex].events & EPOLLOUT) events |= EVENT_WRITE;
+	if (epoll_ev[pindex].events & EPOLLERR) events |= EVENT_ERR;
+	if (events == 0) DEBUG(2, "events for fd %d = %d", epoll_ev[pindex].data.fd, epoll_ev[pindex].events);
 	*revents = events;
 	return epoll_ev[pindex].data.fd;
 }

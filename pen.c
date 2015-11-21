@@ -2151,32 +2151,37 @@ static int handle_events(int *pending_close)
                 conn = fd2conn_get(fd);
 		DEBUG(3, "fd = %d => conn = %d", fd, conn);
 		if (conn == -1) continue;
-                if (conns[conn].state & CS_IN_PROGRESS) {
+
+		if (events & EVENT_ERR) {
+			DEBUG(2, "Error on fd %d, connection %d", fd, conn);
+			conns[conn].state = CS_CLOSED;
+		} else if (conns[conn].state & CS_IN_PROGRESS) {
                         if (fd == conns[conn].upfd && events & EVENT_WRITE) {
                                 check_if_connected(conn);
                         }
-                        continue;
-                }
-		conns[conn].t = now;
-                if (fd == conns[conn].downfd) {
-                        if (!udp && (events & EVENT_READ)) {
-                                if (!try_copy_up(conn)) closing = 1;
-                        }
-                        if (events & EVENT_WRITE) {
-                                if (!try_flush_down(conn)) closing = 1;
-                        }
-                } else {        /* down */
-                        if (events & EVENT_READ) {
-                                if (!try_copy_down(conn)) closing = 1;
-                        }
-                        if (!udp && (events & EVENT_WRITE)) {
-                                if (!try_flush_up(conn)) closing = 1;
-                        }
-                }
+                } else {
+			conns[conn].t = now;
+                	if (fd == conns[conn].downfd) {
+                        	if (!udp && (events & EVENT_READ)) {
+                                	if (!try_copy_up(conn)) closing = 1;
+                        	}
+                        	if (events & EVENT_WRITE) {
+                                	if (!try_flush_down(conn)) closing = 1;
+                        	}
+                	} else {        /* down */
+                        	if (events & EVENT_READ) {
+                                	if (!try_copy_down(conn)) closing = 1;
+                        	}
+                        	if (!udp && (events & EVENT_WRITE)) {
+                                	if (!try_flush_up(conn)) closing = 1;
+                        	}
+                	}
+		}
 		if (conns[conn].state == CS_CLOSED) {
 			DEBUG(2, "Connection %d was closed", conn);
 			closing = 1;
 		}
+
 		if (closing) {
 			pending_close[npc++] = conn;
 		}
