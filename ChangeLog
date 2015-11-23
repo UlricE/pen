@@ -1,4 +1,6 @@
 
+151123	Released 0.32.0.
+
 151120	Added tarpit test case to testsuite.sh.
 
 151117	Tarpit functionality to be used with the DSR mode.
