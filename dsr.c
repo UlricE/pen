@@ -85,6 +85,58 @@ static void hexdump(uint8_t *b, int n)
 #define IPV4_SRC(f) (struct in_addr *)(PAYLOAD(f)+12)
 #define IPV4_DST(f) (struct in_addr *)(PAYLOAD(f)+16)
 
+#define TCP_SEGMENT(f, i) (PAYLOAD(f)+i)
+#define TCP_SRC_PORT(f, i) (uint16_t *)(TCP_SEGMENT(f, i))
+#define TCP_DST_PORT(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+2)
+#define TCP_SEQ_NR(f, i) (uint32_t *)(TCP_SEGMENT(f, i)+4)
+#define TCP_ACK_NR(f, i) (uint32_t *)(TCP_SEGMENT(f, i)+8)
+#define TCP_FLAGS(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+12)
+#define TCP_WINDOW(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+14)
+#define TCP_CHECKSUM(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+16)
+#define TCP_URGENT(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+18)
+#define TCP_OPTIONS(f, i) (uint8_t *)(TCP_SEGMENT(f, i)+20)
+
+#define UDP_SEGMENT(f, i) (PAYLOAD(f)+i)
+#define UDP_SRC_PORT(f, i) (uint16_t *)(UDP_SEGMENT(f, i))
+#define UDP_DST_PORT(f, i) (uint16_t *)(UDP_SEGMENT(f, i)+2)
+
+struct l2_frame {
+	uint8_t mac_dst[6];
+	uint8_t mac_src[6];
+	uint16_t ethertype;
+	uint8_t payload[1500];
+};
+
+struct ip_header {
+	uint8_t ver_ihl, dscp_ecn;
+	uint16_t length;
+	uint16_t id, flags_offset;
+	uint8_t ttl, proto;
+	uint16_t header_cksum;
+	uint32_t src, dst;
+	uint32_t options;
+};
+
+struct pseudo_header {
+	uint32_t src, dst;
+	uint8_t zero, proto;
+	uint16_t length;
+};
+
+struct tcp_header {
+	uint16_t sport, dport;
+	uint32_t seqnr;
+	uint32_t acknr;
+	uint16_t flags, winsize;
+	uint16_t cksum, urgent;
+	uint8_t options[40];
+};
+
+struct udp_header {
+	uint16_t sport, dport;
+	uint16_t length, cksum;
+};
+
 static int port;
 
 static uint8_t *buf;
@@ -432,26 +484,6 @@ static int select_server(struct in_addr *a, uint16_t port)
 	return i;
 }
 
-#define TCP_SEGMENT(f, i) (PAYLOAD(f)+i)
-#define TCP_SRC_PORT(f, i) (uint16_t *)(TCP_SEGMENT(f, i))
-#define TCP_DST_PORT(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+2)
-#define TCP_SEQ_NR(f, i) (uint32_t *)(TCP_SEGMENT(f, i)+4)
-#define TCP_ACK_NR(f, i) (uint32_t *)(TCP_SEGMENT(f, i)+8)
-#define TCP_FLAGS(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+12)
-#define TCP_WINDOW(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+14)
-#define TCP_CHECKSUM(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+16)
-#define TCP_URGENT(f, i) (uint16_t *)(TCP_SEGMENT(f, i)+18)
-#define TCP_OPTIONS(f, i) (uint8_t *)(TCP_SEGMENT(f, i)+20)
-
-#define UDP_SEGMENT(f, i) (PAYLOAD(f)+i)
-#define UDP_SRC_PORT(f, i) (uint16_t *)(UDP_SEGMENT(f, i))
-#define UDP_DST_PORT(f, i) (uint16_t *)(UDP_SEGMENT(f, i)+2)
-
-struct ptcp_header {
-	uint32_t src, dst;
-	uint8_t zero, protocol;
-	uint16_t length;
-};
 
 static int ipv4_frame(int fd, int n)
 {
@@ -500,7 +532,7 @@ static int ipv4_frame(int fd, int n)
 		DEBUG(3, "Doing tcp");
 		if (ipv4_protocol == 6) {
 			if (match_acl(tarpit_acl, (struct sockaddr_storage *)&dest)) {
-				struct ptcp_header ph;
+				struct pseudo_header ph;
 				int i;
 				unsigned char src_mac[6];
 				uint32_t seq_nr;
@@ -514,7 +546,7 @@ static int ipv4_frame(int fd, int n)
 				memcpy(&ph.src, IPV4_DST(buf), 4);
 				memcpy(&ph.dst, IPV4_SRC(buf), 4);
 				ph.zero = 0;		/* :P */
-				ph.protocol = 6;	/* tcp */
+				ph.proto = 6;	/* tcp */
 				ph.length = htons(40);		/* 5 32-bit words */
 
 				DEBUG(2, "We should tarpit this");
@@ -620,6 +652,7 @@ void dsr_frame(int fd)
 {
 	int i, type, n, limit;
 	static int dirty_bytes = 0;
+	struct l2_frame *l2p = (struct l2_frame *)buf;
 
 	if (dirty_bytes) {
 		DEBUG(1, "Retrying transmission of %d bytes", dirty_bytes);
@@ -637,9 +670,9 @@ void dsr_frame(int fd)
 			dirty_bytes = 0;
 			break;
 		}
-		DEBUG(2, "MAC destination: %s", mac2str(MAC_DST(buf)));
-		DEBUG(2, "MAC source: %s", mac2str(MAC_SRC(buf)));
-		type = ntohs(*ETHERTYPE(buf));
+		DEBUG(2, "MAC destination: %s", mac2str(l2p->mac_dst));
+		DEBUG(2, "MAC source: %s", mac2str(l2p->mac_src));
+		type = ntohs(l2p->ethertype);
 		DEBUG(2, "EtherType: %s", type2str(type));
 		switch (type) {
 		case 0x0806:
