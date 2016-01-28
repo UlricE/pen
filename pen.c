@@ -536,20 +536,33 @@ static int rewrite_request(int i, int n, char *b)
 #endif
 	/* Look for existing X-Forwarded-For */
 	DEBUG(2, "Looking for X-Forwarded-For");
-
-	if (pen_strcasestr(b, "\nX-Forwarded-For:")) return n;
-
-	DEBUG(2, "Adding X-Forwarded-For");
-	/* Didn't find one, add our own */
-	snprintf(p, sizeof p, "\r\nX-Forwarded-For: %s",
-		pen_ntoa(&clients[conns[i].client].addr));
-	pl=strlen(p);
-	if (n+pl > BUFFER_MAX) return n;
-
-	memmove(q+pl, q, b+n-q);
-	memmove(q, p, pl);
-
-	n += pl;
+	if (!pen_strcasestr(b, "\nX-Forwarded-For:"))
+	{
+		DEBUG(2, "Adding X-Forwarded-For");
+		/* Didn't find one, add our own */
+		snprintf(p, sizeof p, "\r\nX-Forwarded-For: %s",
+			pen_ntoa(&clients[conns[i].client].addr));
+		pl=strlen(p);
+		if (n+pl > BUFFER_MAX) return n;
+		memmove(q+pl, q, b+n-q);
+		memmove(q, p, pl);
+		n += pl;
+	}
+	if (!pen_strcasestr(b, "\nX-Forwarded-Proto:")){
+		DEBUG(2, "Adding X-Forwarded-Proto");
+		/* Didn't find one, add our own */
+		#ifdef HAVE_LIBSSL
+		snprintf(p, sizeof p, "\r\nX-Forwarded-Proto: %s",
+			(conns[i].ssl)?"https":"http");
+		#else
+		snprintf(p, sizeof p, "\r\nX-Forwarded-Proto: %s","http");
+		#endif  /* HAVE_LIBSSL */
+		pl=strlen(p);
+		if (n+pl > BUFFER_MAX) return n;
+		memmove(q+pl, q, b+n-q);
+		memmove(q, p, pl);
+		n += pl;
+	}
 	return n;
 }
 

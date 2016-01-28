@@ -1,4 +1,7 @@
 
+160128	Contribution from Talik Eichinger: add X-Forwarded-Proto when doing
+	SSL decryption.
+
 151123	Released 0.32.0.
 
 151120	Added tarpit test case to testsuite.sh.
