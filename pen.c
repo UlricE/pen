@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2000-2015  Ulric Eriksson <ulric@siag.nu>
+   Copyright (C) 2000-2016  Ulric Eriksson <ulric@siag.nu>
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -548,6 +548,7 @@ static int rewrite_request(int i, int n, char *b)
 		memmove(q, p, pl);
 		n += pl;
 	}
+	b[n] = '\0';
 	if (!pen_strcasestr(b, "\nX-Forwarded-Proto:")){
 		DEBUG(2, "Adding X-Forwarded-Proto");
 		/* Didn't find one, add our own */
