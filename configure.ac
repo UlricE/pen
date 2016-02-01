@@ -1,5 +1,5 @@
 dnl Process this file with autoconf to produce a configure script.
-AC_INIT([pen],[0.32.0])
+AC_INIT([pen],[0.32.1])
 AC_CONFIG_SRCDIR([pen.c])
 AC_CONFIG_HEADERS(config.h)
 AM_INIT_AUTOMAKE
