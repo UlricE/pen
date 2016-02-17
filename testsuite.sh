@@ -304,7 +304,7 @@ echo Success
 
 if test ! -z "$TRP_PEN"; then
 	echo
-	echo "Testing Transparent Reverse Proxy"
+	echo "Testing Transparent Reverse Proxy, TCP"
 	stop_pen
 	ssh root@$TRP_PEN "cd Git/pen && git pull && make && killall pen ; ./pen -r -O transparent 80 $TRP_BACK1 $TRP_BACK2"
 	H=`curl -s http://$TRP_PEN/cgi-bin/remote_addr`
@@ -312,6 +312,14 @@ if test ! -z "$TRP_PEN"; then
 	ssh root@$TRP_PEN "cd Git/pen && killall pen ; ./pen -r 80 $TRP_BACK1 $TRP_BACK2"
 	H=`curl -s http://$TRP_PEN/cgi-bin/remote_addr`
 	check_different "Nontransparent result" "$TRP_MYIP" "$H"
+	echo Success
+
+	echo
+	echo "Testing Transparent Reverse Proxy, UDP"
+	stop_pen
+	ssh root@$TRP_PEN "cd Git/pen && ./pen -r -O transparent -U 53 $TRP_BACK1 $TRP_BACK2"
+	H=`dig +short @$TRP_PEN -x 127.0.0.1`
+	check_result "Transparent result" "localhost." "$H"
 	echo Success
 fi
 
