@@ -107,7 +107,7 @@ static int port;
 
 static int control_acl;
 static char *ctrlport = NULL;
-int listenfd;
+int listenfd = -1;
 static int ctrlfd = -1;
 static char *jail = NULL;
 static char *user = NULL;
