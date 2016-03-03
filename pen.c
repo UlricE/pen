@@ -2450,11 +2450,6 @@ int main(int argc, char **argv)
 	argc -= n;
 	argv += n;
 
-#ifndef WINDOWS
-	if (argc < 1) {
-		usage();
-	}
-#endif
 	now = time(NULL);
 #ifdef WINDOWS
 	start_winsock();
@@ -2463,6 +2458,10 @@ int main(int argc, char **argv)
 	read_cfg(cfgfile);
 
 #ifndef WINDOWS
+	if (listenfd == -1 && argc < 1) {
+		usage();
+	}
+
 	struct rlimit r;
 	getrlimit(RLIMIT_CORE, &r);
 	r.rlim_cur = r.rlim_max;
@@ -2492,15 +2491,17 @@ int main(int argc, char **argv)
 		proto = "udp";
 	}
 
-	snprintf(listenport, sizeof listenport, "%s", argv[0]);
-	/* Direct server return */
-	if (dsr_if) {
-		listenfd = dsr_init(dsr_if, listenport);
-		if (listenfd == -1) {
-			error("Can't initialize direct server return");
+	if (listenfd == -1) {
+		snprintf(listenport, sizeof listenport, "%s", argv[0]);
+		/* Direct server return */
+		if (dsr_if) {
+			listenfd = dsr_init(dsr_if, listenport);
+			if (listenfd == -1) {
+				error("Can't initialize direct server return");
+			}
+		} else {
+			listenfd = open_listener(listenport);
 		}
-	} else {
-		listenfd = open_listener(listenport);
 	}
 	init(argc, argv);
 
