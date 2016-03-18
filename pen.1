@@ -28,8 +28,8 @@ connections.
 
 .SH DESCRIPTION
 .I Pen
-is a load balancer for tcp based protocols such as
-http or smtp. It allows several servers to appear as one to the
+is a load balancer for udp and tcp based protocols such as
+dns, http or smtp. It allows several servers to appear as one to the
 outside and automatically detects servers that are down and distributes
 clients among the available servers. This gives high availability and
 scalable performance.
@@ -94,9 +94,6 @@ Allows most penctl commands to be used on the Pen command line.
 .TP
 -P
 Use poll() for event notification.
-.TP
--Q
-Use kqueue() for event notification (BSD).
 .TP
 -W
 Use weight for server selection.
@@ -224,7 +221,7 @@ GeoIP support is available if pen was built with the --with-geoip option.
 penctl(1), dwatch(1), mergelogs(1), webresolve(1)
 
 .SH AUTHOR
-Copyright (C) 2001-2015 Ulric Eriksson, <ulric@siag.nu>.
+Copyright (C) 2001-2016 Ulric Eriksson, <ulric@siag.nu>.
 
 .SH ACKNOWLEDGEMENTS
 In part inspired by balance by Thomas Obermair.

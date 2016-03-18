@@ -1,4 +1,9 @@
 
+160318	Updated pen manpage.
+	Deprecated -Q option (it didn't do anything since kqueue was already the
+	default where it was available).
+	Fixed error handling in epoll support.
+
 160217	Added transparent UDP test case to testsuite.sh.
 
 160128	Contribution from Talik Eichinger: add X-Forwarded-Proto when doing

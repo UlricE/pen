@@ -2296,7 +2296,12 @@ static int options(int argc, char **argv)
 			do_cmd(optarg, output_file, stdout);
 			break;
 		case 'Q':
+#if 0
 			event_init = kqueue_init;
+#else
+			fprintf(stderr, "Since Pen 0.26.0, kqueue is already the default on supported systems,\n"
+					"making the -Q option obsolete\n");
+#endif
 			break;
 		case 'P':
 			event_init = poll_init;
