@@ -2191,17 +2191,29 @@ static int handle_events(int *pending_close)
 
 static void pending_and_closing(int *pending_close, int npc)
 {
-	int j, p, start;
+	int j, p, start, npe;
 
 	if (pending_list != -1) {
+		npe = npc;
 		p = start = pending_list;
 		do {
 			int conn = dlist_value(p);
 			if (conns[conn].state == CS_IN_PROGRESS) {
+#if 0
+/* We can't do that, because:
+ check_if_timeout calls failover_server;
+ failover_server calls close_conn;
+ close_conn modifies pending_list while we are looping over it */
 				check_if_timeout(conn);
+#else
+				pending_close[npe++] = conn;
+#endif
 			}
 			p = dlist_next(p);
 		} while (p != start);
+		for (j = npc; j < npe; j++) {
+			check_if_timeout(pending_close[j]);
+		}
 	}
         for (j = 0; j < npc; j++) {
 		int conn = pending_close[j];

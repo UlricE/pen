@@ -1,4 +1,6 @@
 
+160321	Bug in pending_and_closing: don't modify the list we're looping over.
+
 160318	Updated pen manpage.
 	Deprecated -Q option (it didn't do anything since kqueue was already the
 	default where it was available).
