@@ -711,6 +711,7 @@ static int copy_up(int i)
 		}
 
 		n = my_send(to, b, rc, 0);	/* no ssl here */
+		conns[i].state &= ~CS_HALFDEAD;
 		SAVE_ERRNO;
 
 		DEBUG(2, "copy_up: send(%d, %p, %d, 0) returns %d, socket_errno = %d",
@@ -797,6 +798,7 @@ static int copy_down(int i)
 			close_conn(i);
 #else
 			n = send(to, (void *)b, rc, 0);
+			conns[i].state = CS_CONNECTED;
 #endif
 			return 0;
 		}
@@ -1822,6 +1824,7 @@ static void add_client(int downfd, struct sockaddr_storage *cli_addr)
 	if (udp && rc > 0) {	/* pass on the message */
 		/* we are "connected" and don't need sendto */
 		rc = send(conns[conn].upfd, (void *)b, rc, 0);
+		conns[conn].state &= ~CS_HALFDEAD;
 		DEBUG(2, "add_client: wrote %d bytes to socket %d", rc, conns[conn].upfd);
 	}
 }
@@ -1854,11 +1857,13 @@ static int flush_down(int i)
 	struct sockaddr name;
 	size_t size = sizeof(struct sockaddr);
 
-	if (!udp)
+	if (!udp) {
 		n = my_send(conns[i].downfd, conns[i].downbptr, conns[i].downn, 0);
-	else
+	} else {
 		n = sendto(conns[i].downfd, (void *)conns[i].downbptr, conns[i].downn, 0,
 			(struct sockaddr *) &name, size);
+		conns[i].state &= ~CS_HALFDEAD;
+	}
 	err = socket_errno;
 #endif  /* HAVE_LIBSSL */
 
@@ -1897,11 +1902,13 @@ static int flush_up(int i)
        struct sockaddr name;
        size_t size = sizeof(struct sockaddr);
 
-	if (!udp)
+	if (!udp) {
 		n = my_send(conns[i].upfd, conns[i].upbptr, conns[i].upn, 0);
-	else
+	} else {
 		n = sendto(conns[i].upfd, (void *)conns[i].upbptr, conns[i].upn, 0,
 			(struct sockaddr *) &name, size);
+		conns[i].state &= ~CS_HALFDEAD;
+	}
 	err = socket_errno;
 
 	DEBUG(2, "flush_up(%d): send(%d, %p, %d, 0) returns %d, errno = %d, socket_errno = %d", \
@@ -1926,6 +1933,7 @@ static int flush_up(int i)
 	return n;
 }
 
+#if 0	/* now handled in store_conn */
 /* For UDP, connection attempts to unreachable servers would sit in the
    connection table forever unless we remove them by force.
    This function is pretty brutal, it simply vacates the next slot
@@ -1939,6 +1947,7 @@ static void recycle_connection(void)
 	if (i >= connections_max) i = 0;
 	close_conn(i);
 }
+#endif
 
 #ifndef WINDOWS
 static void setup_signals(void)
@@ -2154,7 +2163,9 @@ static void arm_listenfd(void)
 {
 	static int can_accept = 0;
 
-	if (can_accept) {
+	if (udp) {
+		event_arm(listenfd, EVENT_READ);
+	} else if (can_accept) {
 		if (connections_used >= connections_max) {
 			event_arm(listenfd, 0);
 			can_accept = 0;
@@ -2202,7 +2213,11 @@ static int handle_events(int *pending_close)
                 } else {
 			conns[conn].t = now;
                 	if (fd == conns[conn].downfd) {
+#if 0
                         	if (!udp && (events & EVENT_READ)) {
+#else
+                        	if (events & EVENT_READ) {
+#endif
                                 	if (!try_copy_up(conn)) closing = 1;
                         	}
                         	if (events & EVENT_WRITE) {
@@ -2212,7 +2227,11 @@ static int handle_events(int *pending_close)
                         	if (events & EVENT_READ) {
                                 	if (!try_copy_down(conn)) closing = 1;
                         	}
+#if 0
                         	if (!udp && (events & EVENT_WRITE)) {
+#else
+                        	if (events & EVENT_WRITE) {
+#endif
                                 	if (!try_flush_up(conn)) closing = 1;
                         	}
                 	}
@@ -2304,7 +2323,9 @@ void mainloop(void)
         while (loopflag) {
                 check_signals();
 		if (dsr_if) dsr_arp(listenfd);
+#if 0	/* handled in store_conn */
                 if (udp && (connections_used >= connections_max)) recycle_connection();
+#endif
 		arm_listenfd();
                 event_wait();
                 now = time(NULL);

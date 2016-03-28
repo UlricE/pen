@@ -71,10 +71,19 @@ int store_conn(int downfd, int client)
 
 	i = connections_last;
 	do {
-		if (conns[i].state == CS_UNUSED) break;
+		if ((conns[i].state == CS_UNUSED) || (conns[i].state & CS_HALFDEAD)) break;
+		if (udp) conns[i].state |= CS_HALFDEAD;
 		i++;
 		if (i >= connections_max) i = 0;
 	} while (i != connections_last);
+
+	/* For TCP, we have either CS_UNUSED or something we can't use */
+	/* For UDP, we have either CS_UNUSED or CS_HALFDEAD */
+	if (conns[i].state & CS_HALFDEAD) {
+		DEBUG(2, "Recycling halfdead connection %d", i);
+		close_conn(i);
+	}
+	/* And now UDP is guaranteed to be CS_UNUSED */
 
 	if (conns[i].state == CS_UNUSED) {
 		connections_last = i;

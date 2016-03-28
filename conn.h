@@ -15,6 +15,7 @@
 #define CS_CLOSED_UP	(4)	/* we read eof from upfd */
 #define CS_CLOSED_DOWN	(8)	/* we read eof from downfd */
 #define CS_CLOSED	(CS_CLOSED_UP | CS_CLOSED_DOWN)
+#define CS_HALFDEAD	(16)	/* has not seen recent traffic */
 
 typedef struct {
 	int state;		/* as per above */
