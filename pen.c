@@ -1123,7 +1123,7 @@ static int open_listener(char *a)
 
 	setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (void *)&one, sizeof one);
 	setsockopt(listenfd, SOL_SOCKET, SO_KEEPALIVE, (void *)&optval, sizeof optval);
-#if 1
+#ifdef SO_REUSEPORT
 	setsockopt(listenfd, SOL_SOCKET, SO_REUSEPORT, (void *)&one, sizeof one);
 #endif
 
@@ -1763,7 +1763,9 @@ static void add_client(int downfd, struct sockaddr_storage *cli_addr)
 			debug("Can't create downfd");
 			return;
 		}
+#ifdef SO_REUSEPORT
 		setsockopt(downfd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof one);
+#endif
 		n = getsockname(listenfd, &listenaddr, &listenlen);
 		if (n != 0) {
 			debug("getsockname returns %d, errno = %d", n, errno);
