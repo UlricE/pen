@@ -1,4 +1,6 @@
 
+160407	Added CS_HALFDEAD for UDP streams that haven't seen traffic in a while
+
 160321	Bug in pending_and_closing: don't modify the list we're looping over.
 
 160318	Updated pen manpage.
