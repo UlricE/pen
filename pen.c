@@ -789,11 +789,15 @@ static int copy_down(int i)
 		int n;
 
 		if (udp) {
+#if 0	/* don't close the connection, there may be more where that came from */
 			struct sockaddr_storage *ss = &clients[conns[i].client].addr;
 			socklen_t sss = pen_ss_size(ss);
 			DEBUG(2, "copy_down sending %d bytes to socket %d", rc, to);
 			n = sendto(to, (void *)b, rc, 0, (struct sockaddr *)ss, sss);
 			close_conn(i);
+#else
+			n = send(to, (void *)b, rc, 0);
+#endif
 			return 0;
 		}
 
@@ -1117,6 +1121,9 @@ static int open_listener(char *a)
 
 	setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (void *)&one, sizeof one);
 	setsockopt(listenfd, SOL_SOCKET, SO_KEEPALIVE, (void *)&optval, sizeof optval);
+#if 1
+	setsockopt(listenfd, SOL_SOCKET, SO_REUSEPORT, (void *)&one, sizeof one);
+#endif
 
 	if (bind(listenfd, (struct sockaddr *)&ss, pen_ss_size(&ss)) < 0) {
 		error("can't bind local address");
@@ -1737,7 +1744,10 @@ static void add_client(int downfd, struct sockaddr_storage *cli_addr)
 
 	/* we don't know the client address for udp until we read the message */
 	if (udp) {
+		int n, one = 1;
 		socklen_t len = sizeof *cli_addr;
+		struct sockaddr listenaddr;
+		socklen_t listenlen = sizeof listenaddr;
 		rc = recvfrom(listenfd, (void *)b, sizeof b, 0, (struct sockaddr *)cli_addr, &len);
 		DEBUG(2, "add_client: received %d bytes from client", rc);
 		if (rc < 0) {
@@ -1745,7 +1755,33 @@ static void add_client(int downfd, struct sockaddr_storage *cli_addr)
 				debug("Error receiving data");
 			return;
 		}
+	/* we need a downfd for udp as well */
+		downfd = socket_nb(cli_addr->ss_family, protoid, 0);
+		if (downfd == -1) {
+			debug("Can't create downfd");
+			return;
+		}
+		setsockopt(downfd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof one);
+		n = getsockname(listenfd, &listenaddr, &listenlen);
+		if (n != 0) {
+			debug("getsockname returns %d, errno = %d", n, errno);
+			close(downfd);
+			return;
+		}
+		n = bind(downfd, &listenaddr, listenlen);
+		if (n != 0) {
+			debug("bind returns %d, errno = %d", n, errno);
+			close(downfd);
+			return;
+		}
+		n = connect(downfd, (struct sockaddr *)cli_addr, pen_ss_size(cli_addr));
+		if (n != 0) {
+			debug("connect (downfd = %d) returns %d, errno = %d", downfd, n, errno);
+			close(downfd);
+			return;
+		}
 	}
+
 	client = store_client(cli_addr);	// no server yet
 	DEBUG(2, "store_client returns %d", client);
 
@@ -1974,7 +2010,11 @@ static void check_listen_socket(void)
 		dsr_frame(listenfd);
 	} else if (udp) {
 		/* special case for udp */
+#if 0	/* don't repurpose listenfd */
 		downfd = listenfd;
+#else
+		downfd = 0;
+#endif
 		add_client(downfd, &cli_addr);
 	} else {
 	/* process tcp connection(s) */
