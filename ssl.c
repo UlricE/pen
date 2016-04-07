@@ -272,11 +272,6 @@ static SSL_CTX *ssl_create_context(char *keyfile, char *certfile,
 		cacert_file = NULL;
 
 	switch (ssl_protocol) {
-#if 0
-	case SRV_SSL_V2:
-		ssl_context = SSL_CTX_new(SSLv2_method());
-		break;
-#endif
 #ifndef OPENSSL_NO_SSL3
 	case SRV_SSL_V3:
 		ssl_context = SSL_CTX_new(SSLv3_method());

@@ -50,9 +50,6 @@ static void epoll_event_arm(int fd, int events)
 static void epoll_event_delete(int fd)
 {
 	DEBUG(2, "epoll_event_delete(fd=%d)", fd);
-#if 0
-	epoll_ctl(efd, EPOLL_CTL_DEL, fd, NULL);
-#endif
 }
 
 static void epoll_event_wait(void)

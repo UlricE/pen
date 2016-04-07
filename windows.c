@@ -13,45 +13,6 @@ uid_t getuid(void)
 	return 0;
 }
 
-#if 0
-static int sigemptyset(sigset_t *set)
-{
-	return 0;
-}
-
-static int getrlimit(int resource, struct rlimit *rlim)
-{
-	return 0;
-}
-
-static int setrlimit(int resource, const struct rlimit *rlim)
-{
-	return 0;
-}
-
-static struct passwd *getpwnam(const char *name)
-{
-	static struct passwd p;
-	p.pw_uid = 0;
-	p.pw_gid = 0;
-	return &p;
-}
-
-static int chroot(const char *path)
-{
-	return 0;
-}
-
-static int setgid(gid_t gid)
-{
-	return 0;
-}
-
-static int setuid(uid_t uid)
-{
-	return 0;
-}
-#endif
 
 int inet_aton(const char *cp, struct in_addr *addr)
 {
@@ -59,21 +20,6 @@ int inet_aton(const char *cp, struct in_addr *addr)
 	return (addr->s_addr == INADDR_NONE) ? 0 : 1;
 }
 
-#if 0
-const char *inet_ntop(int af, const void *src, char *dst, socklen_t size)
-{
-	struct sockaddr_in sa;
-	memset(&sa, 0, sizeof sa);
-	memcpy(&sa.sin_addr, src, sizeof sa.sin_addr);
-	sa.sin_family = af;
-	if (WSAAddressToString((struct sockaddr *)&sa, sizeof sa, 0, dst, (LPDWORD)&size) != 0) {
-		DWORD rv = WSAGetLastError();
-		debug("WSAAddressToString returns %d", rv);
-		return NULL;
-	}
-	return dst;
-}
-#endif
 
 void make_nonblocking(int fd)
 {

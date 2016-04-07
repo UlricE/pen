@@ -375,11 +375,7 @@ int try_server(int index, int conn)
 			conns[conn].state |= CS_CLOSED_DOWN;
 		}
 		event_add(upfd, EVENT_READ);
-#if 0
-		if (!udp) event_add(conns[conn].downfd, EVENT_READ);
-#else
 		event_add(conns[conn].downfd, EVENT_READ);
-#endif
 		servers[index].c++;
 		if (servers[index].status) {
 			servers[index].status = 0;

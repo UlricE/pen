@@ -88,26 +88,10 @@ static int open_unix_socket(char *path)
 static int open_socket(char *addr, char *port)
 {
 	int fd = -1;
-#if 0
-	struct sockaddr_in serv_addr;
-	struct hostent *h;
-	struct in_addr a;
-	struct servent *s;
-#else
 	struct addrinfo *ai;
 	struct addrinfo hints;
 	struct addrinfo *runp;
-#endif
 	int n;
-#if 0
-	h = gethostbyname(addr);
-	if (h == NULL) error("unknown or invalid address %s\n", addr);
-	memcpy(&a, h->h_addr, h->h_length);
-	s = getservbyname(port, "tcp");
-	if (s == NULL) po = atoi(port);
-	else po = ntohs(s->s_port);
-	fd = socket(AF_INET, SOCK_STREAM, 0);
-#else
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_flags = AI_ADDRCONFIG;
 	hints.ai_socktype = SOCK_STREAM;
@@ -118,20 +102,10 @@ static int open_socket(char *addr, char *port)
 	runp = ai;
 	/* only using first result; should try all */
 	fd = socket(runp->ai_family, runp->ai_socktype, runp->ai_protocol);
-#endif
 
 	if (fd < 0) error("error opening socket");
-#if 0
-	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_addr.s_addr = a.s_addr;
-	serv_addr.sin_port = htons(po);
-#endif
 	signal(SIGALRM, alarm_handler);
-#if 0
-	n = connect(fd, (struct sockaddr *)&serv_addr, sizeof serv_addr);
-#else
 	n = connect(fd, runp->ai_addr, runp->ai_addrlen);
-#endif
 	alarm(0);
 	if (n == -1) {
 		error("error connecting to server");

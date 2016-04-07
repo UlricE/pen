@@ -531,9 +531,7 @@ static int rewrite_request(int i, int n, char *b)
 		q = strstr(b, "\n\n");
 	}
 	if (!q) return n;		/* not a header */
-#if 0	/* how is that supposed to happen? */
-	if (q >= b+n) return n;		/* outside of buffer */
-#endif
+
 	/* Look for existing X-Forwarded-For */
 	DEBUG(2, "Looking for X-Forwarded-For");
 	if (!pen_strcasestr(b, "\nX-Forwarded-For:"))
@@ -790,16 +788,8 @@ static int copy_down(int i)
 		int n;
 
 		if (udp) {
-#if 0	/* don't close the connection, there may be more where that came from */
-			struct sockaddr_storage *ss = &clients[conns[i].client].addr;
-			socklen_t sss = pen_ss_size(ss);
-			DEBUG(2, "copy_down sending %d bytes to socket %d", rc, to);
-			n = sendto(to, (void *)b, rc, 0, (struct sockaddr *)ss, sss);
-			close_conn(i);
-#else
 			n = send(to, (void *)b, rc, 0);
 			conns[i].state = CS_CONNECTED;
-#endif
 			return 0;
 		}
 
@@ -942,17 +932,12 @@ static void init(int argc, char **argv)
 
 	DEBUG(2, "init(%d, %p); port = %d", argc, argv, port);
 
-#if 0
-	conns = pen_calloc(connections_max, sizeof *conns);
-	clients = pen_calloc(clients_max, sizeof *clients);
-#else
 	debug("Before: conns = %p, connections_max = %d, clients = %p, clients_max = %d",
 		conns, connections_max, clients, clients_max);
 	if (connections_max == 0) expand_conntable(CONNECTIONS_MAX);
 	if (clients_max == 0) expand_clienttable(CLIENTS_MAX);
 	debug("After: conns = %p, connections_max = %d, clients = %p, clients_max = %d",
 		conns, connections_max, clients, clients_max);
-#endif
 
 	current = 0;
 
@@ -1001,14 +986,6 @@ static void init(int argc, char **argv)
 		clients[i].csx = 0;
 		clients[i].crx = 0;
 	}
-#if 0
-	for (i = 0; i < connections_max; i++) {
-		conns[i].upfd = -1;
-		conns[i].downfd = -1;
-		conns[i].upn = 0;
-		conns[i].downn = 0;
-	}
-#endif
 
 	if (debuglevel) {
 		debug("%s starting", PACKAGE_STRING);
@@ -1260,12 +1237,6 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 				} else {
 					ma = "128";
 				}
-#if 0
-				if (inet_pton(AF_INET6, ip, ipaddr) != 1) {
-					debug("acl: can't convert address %s", ip);
-					return;
-				}
-#else
 				struct sockaddr_storage ss;
 				struct sockaddr_in6 *si6;
 				if (pen_aton(ip, &ss) != 1) {
@@ -1278,7 +1249,6 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 				}
 				si6 = (struct sockaddr_in6 *)&ss;
 				memcpy(ipaddr, &si6->sin6_addr, sizeof ipaddr);
-#endif
 				add_acl_ipv6(a, ipaddr, atoi(ma), permit);
 			} else {
 				struct in_addr ipaddr, mask;
@@ -1935,22 +1905,6 @@ static int flush_up(int i)
 	return n;
 }
 
-#if 0	/* now handled in store_conn */
-/* For UDP, connection attempts to unreachable servers would sit in the
-   connection table forever unless we remove them by force.
-   This function is pretty brutal, it simply vacates the next slot
-   after the most recently used one. This will always succeed.
-*/
-static void recycle_connection(void)
-{
-	int i;
-
-	i = connections_last+1;
-	if (i >= connections_max) i = 0;
-	close_conn(i);
-}
-#endif
-
 #ifndef WINDOWS
 static void setup_signals(void)
 {
@@ -2021,11 +1975,7 @@ static void check_listen_socket(void)
 		dsr_frame(listenfd);
 	} else if (udp) {
 		/* special case for udp */
-#if 0	/* don't repurpose listenfd */
-		downfd = listenfd;
-#else
 		downfd = 0;
-#endif
 		add_client(downfd, &cli_addr);
 	} else {
 	/* process tcp connection(s) */
@@ -2215,11 +2165,7 @@ static int handle_events(int *pending_close)
                 } else {
 			conns[conn].t = now;
                 	if (fd == conns[conn].downfd) {
-#if 0
-                        	if (!udp && (events & EVENT_READ)) {
-#else
                         	if (events & EVENT_READ) {
-#endif
                                 	if (!try_copy_up(conn)) closing = 1;
                         	}
                         	if (events & EVENT_WRITE) {
@@ -2229,11 +2175,7 @@ static int handle_events(int *pending_close)
                         	if (events & EVENT_READ) {
                                 	if (!try_copy_down(conn)) closing = 1;
                         	}
-#if 0
-                        	if (!udp && (events & EVENT_WRITE)) {
-#else
                         	if (events & EVENT_WRITE) {
-#endif
                                 	if (!try_flush_up(conn)) closing = 1;
                         	}
                 	}
@@ -2260,15 +2202,7 @@ static void pending_and_closing(int *pending_close, int npc)
 		do {
 			int conn = dlist_value(p);
 			if (conns[conn].state == CS_IN_PROGRESS) {
-#if 0
-/* We can't do that, because:
- check_if_timeout calls failover_server;
- failover_server calls close_conn;
- close_conn modifies pending_list while we are looping over it */
-				check_if_timeout(conn);
-#else
 				pending_close[npe++] = conn;
-#endif
 			}
 			p = dlist_next(p);
 		} while (p != start);
@@ -2325,9 +2259,6 @@ void mainloop(void)
         while (loopflag) {
                 check_signals();
 		if (dsr_if) dsr_arp(listenfd);
-#if 0	/* handled in store_conn */
-                if (udp && (connections_used >= connections_max)) recycle_connection();
-#endif
 		arm_listenfd();
                 event_wait();
                 now = time(NULL);
@@ -2371,12 +2302,8 @@ static int options(int argc, char **argv)
 			do_cmd(optarg, output_file, stdout);
 			break;
 		case 'Q':
-#if 0
-			event_init = kqueue_init;
-#else
 			fprintf(stderr, "Since Pen 0.26.0, kqueue is already the default on supported systems,\n"
 					"making the -Q option obsolete\n");
-#endif
 			break;
 		case 'P':
 			event_init = poll_init;

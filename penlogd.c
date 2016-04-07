@@ -328,10 +328,6 @@ int main(int argc, char **argv)
 			continue;
 		}
 		b[n] = 0;
-#if 0	/* what on earth would send us something like that? */
-		if (strstr(b, "Host:")) {
-			continue;	/* do nothing */
-#endif
 		if (b[0] == '+') {
 			store_pen(b, n);
 		} else {

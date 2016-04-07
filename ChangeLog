@@ -1,5 +1,8 @@
 
-160407	Added CS_HALFDEAD for UDP streams that haven't seen traffic in a while
+160407	Cleaned up code residue surrounded by "#if 0".
+	Released 0.33.0.
+
+160407	Added CS_HALFDEAD for UDP streams that haven't seen traffic in a while.
 
 160321	Bug in pending_and_closing: don't modify the list we're looping over.
 

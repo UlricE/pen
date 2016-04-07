@@ -448,13 +448,6 @@ static int rebuild_hash_index(void)
 		t--;
 	}
 
-#if 0
-for (i = 0; i < HASH_INDEX_SIZE; i++) {
-printf("%d ", hash_index[i]);
-}
-printf("\n");
-#endif
-
 	/* finally claim that the hash index is up to date */
 	server_alg |= ALG_HASH_VALID;
 	free(s);
