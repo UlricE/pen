@@ -517,6 +517,7 @@ static int ipv4_frame(int fd, int n)
 				src_port, dst_port);
 			if (port == 0 || dst_port == port) {
 				memcpy(MAC_DST(buf), servers[server].hwaddr, 6);
+				memcpy(MAC_SRC(buf), our_hw_addr, 6);
 				DEBUG(2, "Sending %d bytes", n);
 				n = send_packet(fd, buf, n);
 			}
@@ -603,6 +604,7 @@ static int ipv4_frame(int fd, int n)
 					src_port, dst_port);
 				if (port == 0 || dst_port == port) {
 					memcpy(MAC_DST(buf), servers[server].hwaddr, 6);
+					memcpy(MAC_SRC(buf), our_hw_addr, 6);
 					DEBUG(2, "Sending %d bytes", n);
 					n = send_packet(fd, buf, n);
 				}
