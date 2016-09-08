@@ -1,4 +1,6 @@
 
+160908	Released 0.33.2.
+
 160560	In epoll.c: check for EPOLLHUP.
 
 160503	In dsr.c: always use our real mac address, to avoid confusing switches.
