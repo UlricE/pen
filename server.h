@@ -43,7 +43,7 @@ extern int server_alg;
 extern char *e_server;
 extern char *a_server;
 
-extern void setaddress(int, char *, int, char *);
+extern void setaddress(int, char *, int, int);
 extern void blacklist_server(int);
 extern int unused_server_slot(int);
 extern int server_is_blacklisted(int);

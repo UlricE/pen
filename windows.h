@@ -56,9 +56,6 @@ extern int service_main(int, char **);
 extern int sigaction(int, const struct sigaction *, struct sigaction *);
 extern uid_t getuid(void);
 extern int inet_aton(const char *, struct in_addr *addr);
-#if 0
-extern const char *inet_ntop(int, const void *, char *, socklen_t);
-#endif
 extern void make_nonblocking(int);
 extern int start_winsock(void);
 

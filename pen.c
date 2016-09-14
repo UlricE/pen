@@ -111,7 +111,6 @@ int listenfd = -1;
 static int ctrlfd = -1;
 static char *jail = NULL;
 static char *user = NULL;
-static char *proto = "tcp";
 
 static char *dsr_if, *dsr_ip;
 
@@ -929,6 +928,7 @@ static void init(int argc, char **argv)
 {
 	int i;
 	int server;
+	int proto;
 
 	DEBUG(2, "init(%d, %p); port = %d", argc, argv, port);
 
@@ -942,6 +942,9 @@ static void init(int argc, char **argv)
 	current = 0;
 
 	server = 0;
+
+	if (udp) proto = SOCK_DGRAM;
+	else proto = SOCK_STREAM;
 
 	for (i = 1; i < argc; i++) {
 		DEBUG(2, "server[%d] = %s", server, argv[i]);
@@ -1053,7 +1056,7 @@ static int open_unix_listener(char *a)
 }
 #endif
 
-static int open_listener(char *a)
+static int open_listener(char *a, int proto)
 {
 	int listenfd;
 	struct sockaddr_storage ss;
@@ -1095,7 +1098,7 @@ static int open_listener(char *a)
 	}
 	pen_setport(&ss, port);
 
-	listenfd = socket_nb(ss.ss_family, protoid, 0);
+	listenfd = socket_nb(ss.ss_family, proto, 0);
 	DEBUG(2, "local address=[%s:%d]", b, port);
 
 	setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (void *)&one, sizeof one);
@@ -1374,7 +1377,7 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 				n = close(listenfd);
 				DEBUG(2, "close(listenfd=%d) returns %d", listenfd, n);
 			}
-			listenfd = open_listener(p);
+			listenfd = open_listener(p, udp ? SOCK_DGRAM : SOCK_STREAM);
 			/* we may need to defer this if we haven't called event_init yet */
 			if (event_add) event_add(listenfd, EVENT_READ);
 			DEBUG(2, "new listenfd = %d", listenfd);
@@ -1728,7 +1731,7 @@ static void add_client(int downfd, struct sockaddr_storage *cli_addr)
 			return;
 		}
 	/* we need a downfd for udp as well */
-		downfd = socket_nb(cli_addr->ss_family, protoid, 0);
+		downfd = socket_nb(cli_addr->ss_family, udp ? SOCK_DGRAM : SOCK_STREAM, 0);
 		if (downfd == -1) {
 			debug("Can't create downfd");
 			return;
@@ -2492,17 +2495,12 @@ int main(int argc, char **argv)
 		if (getuid() == 0 && user == NULL) {
 			debug("Won't open control port running as root; use -u to run as different user");
 		} else {
-			ctrlfd = open_listener(ctrlport);
+			ctrlfd = open_listener(ctrlport, SOCK_STREAM);
 		}
 	}
 
 
 	/* Balancing port */
-	if (udp) {
-		protoid = SOCK_DGRAM;
-		proto = "udp";
-	}
-
 	if (listenfd == -1) {
 		snprintf(listenport, sizeof listenport, "%s", argv[0]);
 		/* Direct server return */
@@ -2512,7 +2510,7 @@ int main(int argc, char **argv)
 				error("Can't initialize direct server return");
 			}
 		} else {
-			listenfd = open_listener(listenport);
+			listenfd = open_listener(listenport, udp ? SOCK_DGRAM : SOCK_STREAM);
 		}
 	}
 	init(argc, argv);

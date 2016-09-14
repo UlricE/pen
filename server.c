@@ -73,7 +73,7 @@ static int pen_hash(struct sockaddr_storage *a)
 /* Introduce the new format "[address]:port:maxc:hard:weight:prio"
    in addition to the old one.
 */
-void setaddress(int server, char *s, int dp, char *proto)
+void setaddress(int server, char *s, int dp, int proto)
 {
 	char address[1024], pno[100];
 	int n;
@@ -96,7 +96,7 @@ void setaddress(int server, char *s, int dp, char *proto)
 	if (n < 5) servers[server].weight = 0;
 	if (n < 6) servers[server].prio = 0;
 
-	DEBUG(2, "n = %d, address = %s, pno = %d, maxc1 = %d, hard = %d, weight = %d, prio = %d, proto = %s ", \
+	DEBUG(2, "n = %d, address = %s, pno = %d, maxc1 = %d, hard = %d, weight = %d, prio = %d, proto = %d ", \
 		n, address, port, servers[server].maxc, \
 		servers[server].hard, servers[server].weight, \
 		servers[server].prio, proto);
@@ -349,7 +349,7 @@ int try_server(int index, int conn)
 		DEBUG(1, "try_server: denied by acl");
 		return 0;
 	}
-	upfd = socket_nb(addr->ss_family, protoid, 0);
+	upfd = socket_nb(addr->ss_family, udp ? SOCK_DGRAM : SOCK_STREAM, 0);
 
 	if (keepalive) {
 		setsockopt(upfd, SOL_SOCKET, SO_KEEPALIVE, (void *)&optval, sizeof optval);

@@ -1,4 +1,4 @@
-extern int getport(char *, char *);
+extern int getport(char *, int);
 extern int pen_setport(struct sockaddr_storage *, int);
 extern int pen_getport(struct sockaddr_storage *);
 extern char *pen_ntoa(struct sockaddr_storage *);

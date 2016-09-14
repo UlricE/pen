@@ -1,4 +1,6 @@
 
+160914	Fixed issue #30: UDP not working in combination with a configuration file.
+
 160908	Released 0.33.2.
 
 160560	In epoll.c: check for EPOLLHUP.

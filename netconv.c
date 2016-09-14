@@ -19,9 +19,9 @@
 #include "windows.h"
 
 /* return port number in host byte order */
-int getport(char *p, char *proto)
+int getport(char *p, int proto)
 {
-	struct servent *s = getservbyname(p, proto);
+	struct servent *s = getservbyname(p, proto == SOCK_STREAM ? "tcp" : "udp");
 	if (s == NULL) {
 		return atoi(p);
 	} else {
