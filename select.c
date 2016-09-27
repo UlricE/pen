@@ -89,7 +89,7 @@ void select_init(void)
 {
 	DEBUG(2, "select_init()");
 	if ((connections_max*2+10) > FD_SETSIZE) {
-		error("Number of simultaneous connections to large.\n"
+		error("Number of simultaneous connections too large.\n"
 			"Maximum is %d, or re-build pen with larger FD_SETSIZE",
 			(FD_SETSIZE-10)/2);
 	}
