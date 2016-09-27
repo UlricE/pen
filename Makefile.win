@@ -1,4 +1,4 @@
-CFLAGS=-Wall -O2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ggdb -DWINDOWS -D_WIN32_WINNT=0x0600 -DDEBUGGING
+CFLAGS=-Wall -O2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ggdb -DWINDOWS -D_WIN32_WINNT=0x0600 -DDEBUGGING -DFD_SETSIZE=1024
 OBJ=pen.o select.o poll.o kqueue.o epoll.o dlist.o ssl.o dsr.o memory.o diag.o settings.o acl.o event.o netconv.o server.o client.o conn.o idlers.o windows.o
 LIB=-lws2_32 -lpsapi -lole32 -loleaut32 -luuid
 
