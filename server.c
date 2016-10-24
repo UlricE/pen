@@ -363,7 +363,10 @@ int try_server(int index, int conn)
 
 	if (source) {
 		/* specify local address for upstream connection */
-		bind(upfd, (struct sockaddr *)source, pen_ss_size(source));
+		int n = bind(upfd, (struct sockaddr *)source, pen_ss_size(source));
+		if (n == -1) {
+			debug("bind: %s", strerror(errno));
+		}
 	} else if (transparent) {
 		/* use originating client's address for upstream connection */
 		spoof_bind(index, conn, upfd);
