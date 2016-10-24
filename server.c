@@ -361,7 +361,13 @@ int try_server(int index, int conn)
 	}
 	conns[conn].t = now;
 
-	if (transparent) spoof_bind(index, conn, upfd);
+	if (source) {
+		/* specify local address for upstream connection */
+		bind(upfd, (struct sockaddr *)source, pen_ss_size(source));
+	} else if (transparent) {
+		/* use originating client's address for upstream connection */
+		spoof_bind(index, conn, upfd);
+	}
 
 	n = connect(upfd, (struct sockaddr *)addr, pen_ss_size(addr));
 	err = socket_errno;

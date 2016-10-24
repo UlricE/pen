@@ -1,4 +1,7 @@
 
+161024	Allow setting local address for upstream connections. This fixes issue #31.
+	New penctl command "source" to set this option.
+
 160914	Fixed issue #30: UDP not working in combination with a configuration file.
 
 160908	Released 0.33.2.

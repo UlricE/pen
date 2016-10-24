@@ -114,6 +114,8 @@ static char *user = NULL;
 
 static char *dsr_if, *dsr_ip;
 
+struct sockaddr_storage *source = NULL;
+
 #ifdef WINDOWS
 /* because Windows scribbles over errno in an uncalled-for manner */
 static int saved_errno;
@@ -1511,6 +1513,15 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		int fd = p ? atoi(p) : 0;
 		int conn = fd2conn_get(fd);
 		output(op, "Socket %d belongs to connection %d\n", fd, conn);
+	} else if (!strcmp(p, "source")) {
+		p = strtok(NULL, " ");
+		if (!source) source = pen_malloc(sizeof *source);
+		if (pen_aton(p, source) == 0) {
+			debug("pen_aton(%d, source) returns 0", p);
+			output(op, "unable to set source address to '%s'", p);
+			free(source);
+			source = NULL;
+		}
 	} else if (!strcmp(p, "status")) {
 		if (webstats()) {
 			fp = fopen(webfile, "r");

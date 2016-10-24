@@ -18,6 +18,7 @@ extern int socket_nb(int, int, int);
 
 extern int listenfd;
 extern time_t now;
+extern struct sockaddr_storage *source;
 
 extern void mainloop(void);
 
