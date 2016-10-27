@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -39,12 +40,12 @@ static int ssl_verify_cb(int ok, X509_STORE_CTX *ctx)
 {
 	char buffer[256];
 
-	X509_NAME_oneline(X509_get_issuer_name(ctx->current_cert),
+	X509_NAME_oneline(X509_get_issuer_name(X509_STORE_CTX_get_current_cert(ctx)),
 			buffer, sizeof(buffer));
 	if (ok) {
 		debug("SSL: Certificate OK: %s", buffer);
 	} else {
-		switch (ctx->error) {
+		switch (X509_STORE_CTX_get_error(ctx)) {
 		case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT:
 			debug("SSL: Cert error: CA not known: %s", buffer);
 			break;
@@ -65,7 +66,7 @@ static int ssl_verify_cb(int ok, X509_STORE_CTX *ctx)
 			break;
 		default:
 			debug("SSL: Cert error: unknown error %d in %s",
-				ctx->error, buffer);
+				X509_STORE_CTX_get_error(ctx), buffer);
 			break;
 		}
 	}
@@ -76,14 +77,25 @@ static RSA *ssl_temp_rsa_cb(SSL *ssl, int export, int keylength)
 {
 	static RSA *rsa = NULL;
 
-	if (rsa == NULL)
-		rsa = RSA_generate_key(512, RSA_F4, NULL, NULL);
+	if (rsa == NULL) {
+		RSA *rsa = RSA_new();
+		BIGNUM *bn = BN_new();
+		if (rsa == NULL ||
+		    bn == NULL ||
+		    !BN_set_word(bn, RSA_F4) ||
+		    !RSA_generate_key_ex(rsa, 512, bn, NULL)) {
+			BN_free(bn);
+			RSA_free(rsa); rsa = NULL;
+		}
+	}
 	return rsa;
 }
 
 static void ssl_info_cb(const SSL *ssl, int where, int ret)
 {
+#if defined SSL3_ST_SR_CLNT_HELLO_A || defined SSL23_ST_SR_CLNT_HELLO_A
 	int st = SSL_get_state(ssl);
+#endif
 	const char *state = SSL_state_string_long(ssl);
 	const char *type = SSL_alert_type_string_long(ret);
 	const char *desc = SSL_alert_desc_string_long(ret);
@@ -106,13 +118,18 @@ static void ssl_info_cb(const SSL *ssl, int where, int ret)
 	DEBUG(3, "SSL state = %s", state);
 	DEBUG(3, "Alert type = %s", type);
 	DEBUG(3, "Alert description = %s", desc);
+#ifdef SSL3_ST_SR_CLNT_HELLO_A
 	if (st == SSL3_ST_SR_CLNT_HELLO_A) {
 		DEBUG(3, "\tSSL3_ST_SR_CLNT_HELLO_A");
 		renegotiating = 1;
-	} else if (st == SSL23_ST_SR_CLNT_HELLO_A) {
+	}
+#endif
+#ifdef SSL23_ST_SR_CLNT_HELLO_A
+	if (st == SSL23_ST_SR_CLNT_HELLO_A) {
 		DEBUG(3, "\tSSL23_ST_SR_CLNT_HELLO_A");
 		renegotiating = 1;
 	}
+#endif
 	if (conn == NULL) {
 		debug("Whoops, no conn info");
 	} else {
@@ -271,25 +288,22 @@ static SSL_CTX *ssl_create_context(char *keyfile, char *certfile,
 	if (cacert_file != NULL && *cacert_file == 0)
 		cacert_file = NULL;
 
-	switch (ssl_protocol) {
-#ifndef OPENSSL_NO_SSL3
-	case SRV_SSL_V3:
-		ssl_context = SSL_CTX_new(SSLv3_method());
-		break;
-#endif
-	default:
-	case SRV_SSL_V23:
-		ssl_context = SSL_CTX_new(SSLv23_method());
-		break;
-	case SRV_SSL_TLS1:
-		ssl_context = SSL_CTX_new(TLSv1_method());
-		break;
-	}
+	ssl_context = SSL_CTX_new(SSLv23_method());
 	if (ssl_context == NULL) {
 		err = ERR_get_error();
 		debug("SSL: Error allocating context: %s",
 			ERR_error_string(err, NULL));
 		return NULL;
+	}
+	switch (ssl_protocol) {
+#ifndef OPENSSL_NO_SSL3
+	case SRV_SSL_V3:
+		ssl_options |= SSL_OP_NO_SSLv2;
+		break;
+#endif
+	case SRV_SSL_TLS1:
+		ssl_options |= SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3;
+		break;
 	}
 	DEBUG(1, "ssl_options = 0x%lx", ssl_options);
 	if (ssl_options) {
