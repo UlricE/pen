@@ -1,4 +1,7 @@
 
+161028	Merged pull request from Vincent Bernat for OpenSSL 1.1.0 compatibility.
+	This fixes issue #28.
+
 161024	Allow setting local address for upstream connections. This fixes issue #31.
 	New penctl command "source" to set this option.
 
