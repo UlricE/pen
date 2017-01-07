@@ -104,6 +104,7 @@ static FILE *pidfp = NULL;
 static char *webfile = NULL;
 static char listenport[1000];
 static int port;
+static int peek = 0;
 
 static int control_acl;
 static char *ctrlport = NULL;
@@ -1426,6 +1427,8 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 			logfile = NULL;
 			if (logfp) fclose(logfp);
 			logfp = NULL;
+		} else if (!strcmp(p, "peek")) {
+			peek = 0;
 		} else if (!strcmp(p, "prio")) {
 			server_alg &= ~ALG_PRIO;
 		} else if (!strcmp(p, "roundrobin")) {
@@ -1441,6 +1444,8 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		} else if (!strcmp(p, "weight")) {
 			server_alg &= ~ALG_WEIGHT;
 		}
+	} else if (!strcmp(p, "peek")) {
+		peek = 1;
 	} else if (!strcmp(p, "pending_max")) {
 		p = strtok(NULL, " ");
 		if (p) pending_max = atoi(p);
@@ -1789,6 +1794,15 @@ static void add_client(int downfd, struct sockaddr_storage *cli_addr)
 		conns[conn].upfd = -1;
 		conns[conn].state = CS_CONNECTED|CS_CLOSED_UP;
 		if (!udp) event_add(conns[conn].downfd, EVENT_READ);
+		return;
+	}
+
+	if (peek) {	/* we'll choose a server later */
+		DEBUG(2, "We'll choose a server later");
+		conns[conn].initial = -1;
+		conns[conn].upfd = -1;
+		conns[conn].state = CS_WAIT_PEEK;
+		event_add(conns[conn].downfd, EVENT_READ);
 		return;
 	}
 
