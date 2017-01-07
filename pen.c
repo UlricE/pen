@@ -1205,11 +1205,11 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 	int n;
 	FILE *fp;
 
-	DEBUG(2, "do_cmd(%s, %p, %p)", b, output, op);
 	p = strchr(b, '\r');
 	if (p) *p = '\0';
 	p = strchr(b, '\n');
 	if (p) *p = '\0';
+	DEBUG(2, "do_cmd(%s, %p, %p)", b, output, op);
 	p = strtok(b, " ");
 	if (p == NULL) return;
 	if (!strcmp(p, "abort_on_error")) {
