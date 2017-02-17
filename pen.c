@@ -1312,7 +1312,7 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 		}
 	} else if (!strcmp(p, "conn_max")) {
 		p = strtok(NULL, " ");
-		if (p) expand_clienttable(atoi(p));
+		if (p) expand_conntable(atoi(p));
 		output(op, "%d\n", connections_max);
 	} else if (!strcmp(p, "control")) {
 		output(op, "%s\n", ctrlport);

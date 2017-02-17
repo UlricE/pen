@@ -1,4 +1,10 @@
 
+170217	Corrected typo in pen.c per suggestion by Belinda Liu.
+	This fixes issue #38.
+	Released 0.34.1.
+
+161029	Released 0.34.0.
+
 161028	Merged pull request from Vincent Bernat for OpenSSL 1.1.0 compatibility.
 	This fixes issue #28.
 
