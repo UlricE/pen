@@ -239,6 +239,11 @@ int failover_server(int conn)
 		return 0;
 	}
 	if (conns[conn].upfd != -1) {
+		if (conns[conn].state & CS_IN_PROGRESS) {
+			pending_list = dlist_remove(conns[conn].pend);
+			pending_queue--;
+		}
+
 		close(conns[conn].upfd);
 		conns[conn].upfd = -1;
 	}

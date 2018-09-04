@@ -173,7 +173,7 @@ void close_conn(int i)
 		debug("connections_used = %d. Resetting.", connections_used);
 		connections_used = 0;
 	}
-	if (conns[i].state == CS_IN_PROGRESS) {
+	if (conns[i].state & CS_IN_PROGRESS) {
 		pending_list = dlist_remove(conns[i].pend);
 		pending_queue--;
 	}

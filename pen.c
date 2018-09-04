@@ -2065,7 +2065,7 @@ static void check_if_connected(int i)
 		return;
 	}
 	DEBUG(2, "Connection %d completed", i);
-	if (conns[i].state == CS_IN_PROGRESS) {
+	if (conns[i].state & CS_IN_PROGRESS) {
 		pending_list = dlist_remove(conns[i].pend);
 		pending_queue--;
 	}
@@ -2185,7 +2185,7 @@ static int handle_events(int *pending_close)
 
 		if (events & EVENT_ERR) {
 			DEBUG(2, "Error on fd %d, connection %d", fd, conn);
-			conns[conn].state = CS_CLOSED;
+			conns[conn].state |= CS_CLOSED;
 		} else if (conns[conn].state & CS_IN_PROGRESS) {
                         if (fd == conns[conn].upfd && events & EVENT_WRITE) {
                                 check_if_connected(conn);
@@ -2208,7 +2208,7 @@ static int handle_events(int *pending_close)
                         	}
                 	}
 		}
-		if (conns[conn].state == CS_CLOSED) {
+		if ((conns[conn].state & CS_CLOSED) == CS_CLOSED) {
 			DEBUG(2, "Connection %d was closed", conn);
 			closing = 1;
 		}
@@ -2229,7 +2229,7 @@ static void pending_and_closing(int *pending_close, int npc)
 		p = start = pending_list;
 		do {
 			int conn = dlist_value(p);
-			if (conns[conn].state == CS_IN_PROGRESS) {
+			if (conns[conn].state & CS_IN_PROGRESS) {
 				pending_close[npe++] = conn;
 			}
 			p = dlist_next(p);
