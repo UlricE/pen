@@ -39,33 +39,36 @@ char *ocsp_resp_file = NULL;
 static int ssl_verify_cb(int ok, X509_STORE_CTX *ctx)
 {
 	char buffer[256];
+	X509 *cert = X509_STORE_CTX_get_current_cert(ctx);
 
-	X509_NAME_oneline(X509_get_issuer_name(X509_STORE_CTX_get_current_cert(ctx)),
-			buffer, sizeof(buffer));
+	X509_NAME_oneline(X509_get_issuer_name(cert), buffer, sizeof(buffer));
 	if (ok) {
-		debug("SSL: Certificate OK: %s", buffer);
+		char *subj = X509_NAME_oneline(X509_get_subject_name(cert), NULL, 0);
+		DEBUG(1, "SSL: Certificate OK: issuer = '%s'", buffer);
+		DEBUG(1, "Subject: %s", subj);
+		OPENSSL_free(subj);
 	} else {
 		switch (X509_STORE_CTX_get_error(ctx)) {
 		case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT:
-			debug("SSL: Cert error: CA not known: %s", buffer);
+			DEBUG(1, "SSL: Cert error: CA not known: %s", buffer);
 			break;
 		case X509_V_ERR_CERT_NOT_YET_VALID:
-			debug("SSL: Cert error: Cert not yet valid: %s",
+			DEBUG(1, "SSL: Cert error: Cert not yet valid: %s",
 				buffer);
 			break;
 		case X509_V_ERR_ERROR_IN_CERT_NOT_BEFORE_FIELD:
-			debug("SSL: Cert error: illegal \'not before\' field: %s",
+			DEBUG(1, "SSL: Cert error: illegal \'not before\' field: %s",
 				buffer);
 			break;
 		case X509_V_ERR_CERT_HAS_EXPIRED:
-			debug("SSL: Cert error: Cert expired: %s", buffer);
+			DEBUG(1, "SSL: Cert error: Cert expired: %s", buffer);
 			break;
 		case X509_V_ERR_ERROR_IN_CERT_NOT_AFTER_FIELD:
-			debug("SSL: Cert error: invalid \'not after\' field: %s",
+			DEBUG(1, "SSL: Cert error: invalid \'not after\' field: %s",
 				buffer);
 			break;
 		default:
-			debug("SSL: Cert error: unknown error %d in %s",
+			DEBUG(1, "SSL: Cert error: unknown error %d in %s",
 				X509_STORE_CTX_get_error(ctx), buffer);
 			break;
 		}
