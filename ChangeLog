@@ -1,4 +1,7 @@
 
+181205	In add_client: use struct sockaddr_storage in argument to getsockname
+	in order to fit ipv6 addresses.
+
 181130	Additional options for client certificate verification.
 
 170217	Corrected typo in pen.c per suggestion by Belinda Liu.

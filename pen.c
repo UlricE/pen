@@ -1737,7 +1737,7 @@ static void add_client(int downfd, struct sockaddr_storage *cli_addr)
 	if (udp) {
 		int n, one = 1;
 		socklen_t len = sizeof *cli_addr;
-		struct sockaddr listenaddr;
+		struct sockaddr_storage listenaddr;
 		socklen_t listenlen = sizeof listenaddr;
 		rc = recvfrom(listenfd, (void *)b, sizeof b, 0, (struct sockaddr *)cli_addr, &len);
 		DEBUG(2, "add_client: received %d bytes from client", rc);
@@ -1755,13 +1755,18 @@ static void add_client(int downfd, struct sockaddr_storage *cli_addr)
 #ifdef SO_REUSEPORT
 		setsockopt(downfd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof one);
 #endif
-		n = getsockname(listenfd, &listenaddr, &listenlen);
+		n = getsockname(listenfd, (struct sockaddr *)&listenaddr, &listenlen);
 		if (n != 0) {
 			debug("getsockname returns %d, errno = %d", n, errno);
 			close(downfd);
 			return;
 		}
-		n = bind(downfd, &listenaddr, listenlen);
+		if (listenlen > sizeof listenaddr) {
+			debug("getsockaddr returns address that is too large for the buffer");
+			close(downfd);
+			return;
+		}
+		n = bind(downfd, (struct sockaddr *)&listenaddr, listenlen);
 		if (n != 0) {
 			debug("bind returns %d, errno = %d", n, errno);
 			close(downfd);
