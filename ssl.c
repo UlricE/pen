@@ -362,7 +362,9 @@ static SSL_CTX *ssl_create_context(char *keyfile, char *certfile,
 			debug("continuing anyway...");
 		}
 	}
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 	SSL_CTX_set_tmp_rsa_callback(ssl_context, ssl_temp_rsa_cb);
+#endif
 	SSL_CTX_set_info_callback(ssl_context, ssl_info_cb);
 	SSL_CTX_set_tlsext_status_cb(ssl_context, ssl_stapling_cb);
 	SSL_CTX_set_tlsext_servername_callback(ssl_context, ssl_sni_cb);
@@ -408,8 +410,10 @@ static SSL_CTX *ssl_create_context(char *keyfile, char *certfile,
 
 int ssl_init(void)
 {
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 	SSL_load_error_strings();
 	SSLeay_add_ssl_algorithms();
+#endif
 	ssl_context = ssl_create_context(keyfile, certfile, cacert_dir, cacert_file);
 	if (ssl_context == NULL) {
 		error("Unable to create default context");

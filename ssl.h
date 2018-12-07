@@ -1,6 +1,8 @@
 #ifdef HAVE_LIBSSL
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/bn.h>
+#include <openssl/rsa.h>
 
 #define SRV_SSL_V23 0
 #define SRV_SSL_V2 1
