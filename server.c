@@ -176,16 +176,16 @@ static int server_by_prio(void)
 
 int server_by_roundrobin(void)
 {
-	static int last_server = 0;
-	int i = last_server;
+	static int last_server = -1;
+	int i, j;
 
 	if (nservers == 0) return NO_SERVER;
-	do {
+	for (i = last_server, j = 0; j < nservers; j++) {
 		i = (i+1) % (nservers?nservers:1);
 		DEBUG(3, "server_by_roundrobin considering server %d", i);
 		if (!server_is_unavailable(i)) return (last_server = i);
 		DEBUG(3, "server %d is unavailable, try next one", i);
-	} while (i != last_server);
+	}
 	return NO_SERVER;
 }
 
