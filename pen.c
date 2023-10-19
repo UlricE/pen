@@ -2189,8 +2189,14 @@ static int handle_events(int *pending_close)
 		if (conn == -1) continue;
 
 		if (events & EVENT_ERR) {
-			DEBUG(2, "Error on fd %d, connection %d", fd, conn);
-			conns[conn].state |= CS_CLOSED;
+			DEBUG(2, "Error on fd %d, connection %d in state %d", fd, conn, conns[conn].state);
+			if (conns[conn].state & CS_IN_PROGRESS) {
+				if (fd == conns[conn].upfd) {
+					check_if_connected(conn);
+				}
+			} else {
+				conns[conn].state |= CS_CLOSED;
+			}
 		} else if (conns[conn].state & CS_IN_PROGRESS) {
                         if (fd == conns[conn].upfd && events & EVENT_WRITE) {
                                 check_if_connected(conn);

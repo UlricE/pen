@@ -1,4 +1,7 @@
 
+231019	In handle_events: deal with failed connect() more gracefully than just
+	closing the connection.
+
 181205	In add_client: use struct sockaddr_storage in argument to getsockname
 	in order to fit ipv6 addresses.
 
