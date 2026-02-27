@@ -144,6 +144,9 @@ static struct in_addr our_ip_addr;
 
 static uint8_t our_hw_addr[6];
 
+time_t last_hash_rebuild = 0;
+extern int blacklist_time;
+
 /* OS specific features */
 #ifdef HAVE_LINUX_IF_PACKET_H
 #include <linux/if_packet.h>
@@ -450,6 +453,7 @@ static int rebuild_hash_index(void)
 
 	/* finally claim that the hash index is up to date */
 	server_alg |= ALG_HASH_VALID;
+	last_hash_rebuild = now;
 	free(s);
 	return 1;
 }
@@ -470,6 +474,7 @@ static int select_server(struct in_addr *a, uint16_t port)
 	int h = hash(a, port);
 	int i;
 	if ((server_alg & ALG_HASH_VALID) == 0) {
+		DEBUG(2, "select_server : rebuilding hash");
 		if (!rebuild_hash_index()) return NO_SERVER;	/* failure */
 	}
 	i = hash_index[h];
@@ -622,17 +627,22 @@ void dsr_arp(int fd)
 
 	DEBUG(2, "dsr_arp(%d)", fd);
 	since = now-last_arp;
-	DEBUG(2, "%d seconds since last update", since);
+	DEBUG(2, "dsr_arp() %d seconds since last update", since);
+	DEBUG(2, "dsr_arp() %d seconds since last rebuilt", now - last_hash_rebuild);
+	if  (  ( last_hash_rebuild == 0 ) || (now - last_hash_rebuild  > blacklist_time) ) {
+		server_alg ^= ALG_HASH_VALID;
+		DEBUG(2, "dsr_arp() : invalidating hash" );
+	}
 	if (since) {
-		DEBUG(2, "Going through the server list");
+		DEBUG(2, "dsr_arp(): Going through the server list");
 		for (server = 0; server < nservers; server++) {
-			DEBUG(2, "Checking server %d", server);
+			DEBUG(2, "dsr_arp(): Checking server %d", server);
 			if (unused_server_slot(server)) {
-				DEBUG(2, "Server slot %d is unused", server);
+				DEBUG(2, "dsr_arp(): Server slot %d is unused", server);
 				continue;
 			}
 			if (real_hw_known(server) && since < 60) {
-				DEBUG(2, "Server %d hw address is known", server);
+				DEBUG(2, "dsr_arp(): Server %d hw address is known", server);
 				continue;
 			}
 			si = (struct sockaddr_in *)&servers[server].addr;

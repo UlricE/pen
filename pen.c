@@ -1504,6 +1504,13 @@ static void do_cmd(char *b, void (*output)(void *, char *, ...), void *op)
 				servers[n].prio = atoi(q);
 			}
 		}
+		if (dsr_if) {
+			// if dsr, invalid the hash table, otherwise
+			// these settings never take effect.
+			server_alg ^= ALG_HASH_VALID;
+			DEBUG(2, "do_cmd() - if dsr_if - invalidating hash");
+		}
+
 	} else if (!strcmp(p, "servers")) {
 		for (n = 0; n < nservers; n++) {
 			output(op,
