@@ -1680,10 +1680,17 @@ static void do_ctrl(int downfd, struct sockaddr_storage *cli_addr)
 	if (!match_acl(control_acl, cli_addr)) {
 		debug("do_ctrl: not from there");
 	} else {
-		n = my_recv(downfd, b, max_b-1, 0);
-		if (n != -1) {
-			b[n] = '\0';
-			do_cmd(b, output_net, &downfd);
+		for (;;) {
+			n = my_recv(downfd, b, max_b-1, 0);
+			if (n == -1) {
+				if (errno == EAGAIN || errno == EINTR) continue;
+				DEBUG(1, "my_recv in do_ctrl: %s", strerror(errno));
+			}
+			else {
+				b[n] = '\0';
+				do_cmd(b, output_net, &downfd);
+			}
+			break;
 		}
 	}
 	close(downfd);
